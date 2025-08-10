@@ -3,7 +3,7 @@
 import random
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Dict, List, Optional, Tuple, Type, Union
 
 from .base import BaseEvent, Entity
 from .entity_manager import EntityManager
@@ -50,15 +50,14 @@ class GlobalContext:
                 entities.append(entity)
         return entities
 
-    def mark_entity_active(self, entity_type: Type[Entity], entity: Entity):
-        """Mark an entity as active (being used by a flow)."""
+    def set_entity_flow(
+        self, entity_type: Type[Entity], entity: Entity, flow_name: Optional[str]
+    ):
+        """Set the flow_name for an entity (implicit state mutation)."""
         entity_id = entity.get_primary_key()
-        self.entity_manager.mark_entity_active(entity_type, entity_id)
-
-    def mark_entity_available(self, entity_type: Type[Entity], entity: Entity):
-        """Mark an entity as available (no longer being used by a flow)."""
-        entity_id = entity.get_primary_key()
-        self.entity_manager.mark_entity_available(entity_type, entity_id)
+        self.entity_manager.set_entity_flow(
+            entity_type, entity_id, flow_name, self.global_clock
+        )
 
     def get_random_available_entity(
         self, entity_type: Type[Entity]
@@ -79,21 +78,30 @@ class GlobalContext:
                 entities.append(entity)
         return entities
 
-    def start_flow(self, flow_start_time: datetime) -> "FlowContext":
+    def start_flow(
+        self, flow_start_time: datetime, flow_name: str = None
+    ) -> "FlowContext":
         """Start a new flow and return its context."""
         session_id = str(uuid.uuid4())
-        return FlowContext(self, session_id, flow_start_time)
+        if flow_name is None:
+            flow_name = f"flow_{session_id[:8]}"
+        return FlowContext(self, session_id, flow_start_time, flow_name)
 
 
 class FlowContext:
     """Flow-specific context maintaining session state and flow clock."""
 
     def __init__(
-        self, global_context: GlobalContext, session_id: str, start_time: datetime
+        self,
+        global_context: GlobalContext,
+        session_id: str,
+        start_time: datetime,
+        flow_name: str,
     ):
         self.global_context = global_context
         self.session_id = session_id
         self.flow_clock = start_time
+        self.flow_name = flow_name
         # Store selected entities by (entity_type, entity_id)
         self.selected_entities: Dict[Type[Entity], str] = {}
 
@@ -101,8 +109,8 @@ class FlowContext:
         """Add an entity to this flow context."""
         entity_id = entity.get_primary_key()
         self.selected_entities[entity_type] = entity_id
-        # Mark entity as active in global context
-        self.global_context.mark_entity_active(entity_type, entity)
+        # Set entity flow_name (implicit mutation)
+        self.global_context.set_entity_flow(entity_type, entity, self.flow_name)
 
     def get_entity(self, entity_type: Type[Entity]) -> Optional[Entity]:
         """Get a selected entity of the specified type from the flow context."""
@@ -158,10 +166,10 @@ class FlowContext:
         return entities
 
     def cleanup(self):
-        """Mark all entities used by this flow as available again."""
+        """Mark all entities used by this flow as available again (remove flow_name)."""
         for entity_type, entity_id in self.selected_entities.items():
-            self.global_context.entity_manager.mark_entity_available(
-                entity_type, entity_id
+            self.global_context.entity_manager.set_entity_flow(
+                entity_type, entity_id, None, self.flow_clock
             )
 
 

@@ -1,6 +1,5 @@
 """Entity management with versioned state tracking."""
 
-import copy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Type
 
@@ -42,8 +41,6 @@ class EntityManager:
     def __init__(self):
         # Track all entity states by (entity_type, entity_id)
         self.entity_states: Dict[Tuple[Type[Entity], str], List[EntityState]] = {}
-        # Track which entities are currently active (being used by flows)
-        self.active_entities: Dict[Tuple[Type[Entity], str], bool] = {}
 
     def add_entity(
         self, entity_type: Type[Entity], entity: Entity, time: datetime
@@ -62,6 +59,9 @@ class EntityManager:
             if not attr_name.startswith("_") and attr_name not in state:
                 state[attr_name] = attr_value
 
+        # Add implicit flow_name state field (None = available)
+        state["flow_name"] = None
+
         # Create initial state version
         entity_state = EntityState(entity_type, entity_id, state, time)
 
@@ -69,9 +69,6 @@ class EntityManager:
             self.entity_states[key] = []
 
         self.entity_states[key].append(entity_state)
-
-        # Mark as available initially
-        self.active_entities[key] = False
 
     def get_entity_state(
         self, entity_type: Type[Entity], entity_id: str, time: Optional[datetime] = None
@@ -159,16 +156,16 @@ class EntityManager:
         where: Optional[List[Tuple]] = None,
         time: Optional[datetime] = None,
     ) -> List[Tuple[str, EntityState]]:
-        """Get available (non-active) entities matching the criteria."""
-        all_entities = self.query(entity_type, where, time)
-        available = []
+        """Get available entities (flow_name is None) matching the criteria."""
+        # Add implicit filter for available entities
+        implicit_filter = [("flow_name", "is", None)]
 
-        for entity_id, entity_state in all_entities:
-            key = (entity_type, entity_id)
-            if not self.active_entities.get(key, False):
-                available.append((entity_id, entity_state))
+        # Combine with custom where conditions
+        combined_where = implicit_filter[:]
+        if where:
+            combined_where.extend(where)
 
-        return available
+        return self.query(entity_type, combined_where, time)
 
     def insert_state(
         self,
@@ -227,20 +224,26 @@ class EntityManager:
         """Mutate entity state with a list of (field, operation, value) updates."""
         self.insert_state(entity_type, entity_id, updates, time)
 
-    def mark_entity_active(self, entity_type: Type[Entity], entity_id: str) -> None:
-        """Mark an entity as active (being used by a flow)."""
-        key = (entity_type, entity_id)
-        self.active_entities[key] = True
+    def set_entity_flow(
+        self,
+        entity_type: Type[Entity],
+        entity_id: str,
+        flow_name: Optional[str],
+        time: datetime,
+    ) -> None:
+        """Set the flow_name for an entity (implicit state mutation)."""
+        self.mutate_state(
+            entity_type, entity_id, [("flow_name", "is", flow_name)], time
+        )
 
-    def mark_entity_available(self, entity_type: Type[Entity], entity_id: str) -> None:
-        """Mark an entity as available (no longer being used by a flow)."""
-        key = (entity_type, entity_id)
-        self.active_entities[key] = False
-
-    def is_entity_active(self, entity_type: Type[Entity], entity_id: str) -> bool:
-        """Check if an entity is currently active."""
-        key = (entity_type, entity_id)
-        return self.active_entities.get(key, False)
+    def is_entity_active(
+        self, entity_type: Type[Entity], entity_id: str, time: Optional[datetime] = None
+    ) -> bool:
+        """Check if an entity is currently active (has a flow_name)."""
+        entity_state = self.get_entity_state(entity_type, entity_id, time)
+        if entity_state is None:
+            return False
+        return entity_state.state.get("flow_name") is not None
 
     def create_entity_instance(
         self, entity_type: Type[Entity], entity_id: str, time: Optional[datetime] = None

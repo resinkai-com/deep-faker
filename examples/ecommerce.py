@@ -1,11 +1,11 @@
-"""E-commerce simulation configuration."""
+"""Realistic E-commerce simulation configuration based on standard events taxonomy."""
 
 from datetime import datetime
+from typing import Optional
 
 from deep_faker import (
     AddDecay,
     BaseEvent,
-    Context,
     Entity,
     Field,
     NewEvent,
@@ -15,112 +15,326 @@ from deep_faker import (
     StateField,
     StdOutOutput,
 )
+from deep_faker.actions import FlowContext
 
 
 # Event Schemas
-class UserRegistered(BaseEvent):
+class AccountCreated(BaseEvent):
+    """When the user successfully creates their account."""
+
     user_id: str = Field(primary_key=True, faker="uuid4")
-    full_name: str = Field(faker="name")
-    email: str = Field(faker="email")
-    registered_at: datetime = Field(faker="now")
-
-
-class UserLoggedIn(BaseEvent):
-    user_id: str
-    login_time: datetime = Field(faker="now")
-    session_id: str = Field(faker="uuid4")
-
-
-class ProductCreated(BaseEvent):
-    product_id: str = Field(primary_key=True, faker="ean")
-    name: str = Field(faker="catch_phrase")
-    status: str = Field(faker="random_element", elements=["available", "discontinued"])
-    price: float = Field(faker="pyfloat", positive=True, min_value=1, max_value=500)
-    category: str = Field(
-        faker="random_element", elements=["Electronics", "Clothing", "Books", "Home"]
+    account_creation_date: str = Field(faker="date")  # YYYY-MM-DD format
+    account_type: str = Field(
+        faker="random_element", elements=["email", "facebook", "twitter"]
     )
+    email: str = Field(faker="email")
+    full_name: str = Field(faker="name")
 
 
-class ProductViewed(BaseEvent):
+class Search(BaseEvent):
+    """Triggered after 3 characters have been entered."""
+
     user_id: str
+    session_id: str = Field(faker="uuid4")
+    search_id: str = Field(faker="uuid4")
+    keywords: str = Field(
+        faker="random_element",
+        elements=["shoes", "jeans", "dress", "jacket", "shirt", "pants"],
+    )
+    number_of_results: int = Field(faker="random_int", min=0, max=50)
+    search_timestamp: datetime = Field(faker="now")
+
+
+class ProductClicked(BaseEvent):
+    """When a user clicks on a product."""
+
+    user_id: str
+    session_id: str = Field(faker="uuid4")
     product_id: str
-    viewed_at: datetime = Field(faker="now")
+    product_name: str
+    price: float
+    rank: int = Field(faker="random_int", min=1, max=10)  # Rank in search results
+    page_source: str = Field(
+        faker="random_element",
+        elements=["search", "homepage", "category", "recommendations"],
+    )
+    clicked_at: datetime = Field(faker="now")
+
+
+class ProductDetailsViewed(BaseEvent):
+    """When a user views the details of a product."""
+
+    user_id: str
+    session_id: str = Field(faker="uuid4")
+    product_id: str
+    page_source: str = Field(
+        faker="random_element",
+        elements=["discover feed", "wishlist", "search", "category"],
+    )
     view_duration: int = Field(faker="random_int", min=5, max=300)  # seconds
+    viewed_at: datetime = Field(faker="now")
 
 
-class AddToCart(BaseEvent):
+class ProductAdded(BaseEvent):
+    """When a user adds a product to their cart."""
+
     user_id: str
+    session_id: str = Field(faker="uuid4")
     product_id: str
+    cart_id: str
     quantity: int = Field(faker="random_int", min=1, max=3)
+    unit_price: float
     added_at: datetime = Field(faker="now")
 
 
-class Purchase(BaseEvent):
+class CheckoutStarted(BaseEvent):
+    """When a user starts the checkout process."""
+
     user_id: str
-    product_id: str
-    quantity: int
-    unit_price: float
-    total_amount: float
-    purchased_at: datetime = Field(faker="now")
-    payment_method: str = Field(
-        faker="random_element", elements=["credit_card", "paypal", "apple_pay"]
+    session_id: str = Field(faker="uuid4")
+    cart_id: str
+    cart_total: float
+    cart_size: int  # Number of items
+    coupon_code: Optional[str] = Field(
+        default=None,
+        faker="random_element",
+        elements=[None, "BOGO2021", "50%off", "SUMMER25"],
     )
+    started_at: datetime = Field(faker="now")
 
 
-class ProductReview(BaseEvent):
+class ProductRemoved(BaseEvent):
+    """When a user removes a product from their cart."""
+
     user_id: str
+    session_id: str = Field(faker="uuid4")
     product_id: str
-    rating: int = Field(faker="random_int", min=1, max=5)
-    review_text: str = Field(faker="text", max_nb_chars=200)
-    reviewed_at: datetime = Field(faker="now")
+    cart_id: str
+    quantity_removed: int = Field(faker="random_int", min=1, max=3)
+    removed_at: datetime = Field(faker="now")
+
+
+class ShippingInfoAdded(BaseEvent):
+    """When a user adds their shipping information."""
+
+    user_id: str
+    session_id: str = Field(faker="uuid4")
+    order_id: str = Field(faker="uuid4")
+    shipping_method: str = Field(
+        faker="random_element", elements=["express", "standard", "overnight"]
+    )
+    shipping_cost: float = Field(
+        faker="pyfloat", min_value=0, max_value=25.99, positive=True
+    )
+    added_at: datetime = Field(faker="now")
+
+
+class PaymentInfoAdded(BaseEvent):
+    """When a user adds their payment information."""
+
+    user_id: str
+    session_id: str = Field(faker="uuid4")
+    order_id: str
+    payment_method: str = Field(
+        faker="random_element", elements=["credit", "apple pay", "paypal"]
+    )
+    added_at: datetime = Field(faker="now")
+
+
+class OrderCompleted(BaseEvent):
+    """When a user successfully completes an order."""
+
+    user_id: str
+    session_id: str = Field(faker="uuid4")
+    order_id: str
+    order_total: float  # Including tax and shipping
+    revenue: float  # Subtotal
+    tax: float
+    shipping_cost: float
+    discount_amount: float = Field(default=0.0)
+    item_count: int
+    completed_at: datetime = Field(faker="now")
+
+
+class OrderEdited(BaseEvent):
+    """When a user makes changes to their order."""
+
+    user_id: str
+    session_id: str = Field(faker="uuid4")
+    order_id: str
+    fields_modified: str = Field(
+        faker="random_element",
+        elements=["quantity", "shipping_address", "payment_method"],
+    )
+    edited_at: datetime = Field(faker="now")
+
+
+class OrderCancelled(BaseEvent):
+    """When an order is cancelled before the item is received."""
+
+    user_id: str
+    session_id: str = Field(faker="uuid4")
+    order_id: str
+    reason: str = Field(
+        faker="random_element",
+        elements=["missed delivery", "out-of-stock", "backorder", "customer_request"],
+    )
+    cancelled_at: datetime = Field(faker="now")
+
+
+class ErrorTriggered(BaseEvent):
+    """When an error is encountered anywhere in the browse or checkout flow."""
+
+    user_id: Optional[str] = None  # May not have user context
+    session_id: str = Field(faker="uuid4")
+    error_code: str = Field(
+        faker="random_element",
+        elements=[
+            "PAYMENT_FAILED",
+            "INVENTORY_ERROR",
+            "NETWORK_TIMEOUT",
+            "VALIDATION_ERROR",
+        ],
+    )
+    error_message: str = Field(
+        faker="random_element",
+        elements=[
+            "Payment processing failed",
+            "Item out of stock",
+            "Connection timeout",
+            "Invalid input",
+        ],
+    )
+    page: str = Field(
+        faker="random_element", elements=["checkout", "product_page", "cart", "search"]
+    )
+    occurred_at: datetime = Field(faker="now")
+
+
+class ProductListed(BaseEvent):
+    """When a new product is added to the catalog."""
+
+    product_id: str = Field(primary_key=True, faker="lexify", text="PROD_????")
+    name: str = Field(
+        faker="random_element",
+        elements=[
+            "Running Shoes",
+            "Blue Jeans",
+            "Summer Dress",
+            "Leather Jacket",
+            "Cotton Shirt",
+            "Casual Pants",
+            "Winter Coat",
+            "Sneakers",
+        ],
+    )
+    price: float = Field(
+        faker="pyfloat", min_value=19.99, max_value=199.99, positive=True
+    )
+    category: str = Field(
+        faker="random_element",
+        elements=["shoes", "jeans", "dress", "jacket", "shirt", "pants"],
+    )
+    listed_at: datetime = Field(faker="now")
 
 
 # Entities
 class User(Entity):
-    source_event = UserRegistered
+    """User entity tracking account and session state."""
+
+    source_event = AccountCreated
     primary_key = "user_id"
 
+    account_type: str = StateField(from_field="account_type", type_=str)
     is_logged_in: bool = StateField(default=False, type_=bool)
-    last_login: datetime = StateField(default=None, type_=datetime)
-    total_purchases: int = StateField(default=0, type_=int)
-    cart_items: int = StateField(default=0, type_=int)
+    current_session_id: Optional[str] = StateField(default=None, type_=str)
+    cart_id: Optional[str] = StateField(default=None, type_=str)
+    total_orders: int = StateField(default=0, type_=int)
     total_spent: float = StateField(default=0.0, type_=float)
+    last_search_keywords: Optional[str] = StateField(default=None, type_=str)
 
 
 class Product(Entity):
-    source_event = ProductCreated
+    """Product entity tracking inventory and popularity."""
+
+    source_event = ProductListed
     primary_key = "product_id"
 
-    current_status: str = StateField(from_field="status", type_=str)
-    current_price: float = StateField(from_field="price", type_=float)
-    inventory: int = StateField(default=50, type_=int)
+    name: str = StateField(from_field="name", type_=str)
+    price: float = StateField(from_field="price", type_=float)
+    category: str = StateField(from_field="category", type_=str)
+    inventory_count: int = StateField(default=100, type_=int)
     view_count: int = StateField(default=0, type_=int)
+    click_count: int = StateField(default=0, type_=int)
+    cart_additions: int = StateField(default=0, type_=int)
     total_sales: int = StateField(default=0, type_=int)
+
+
+class Cart(Entity):
+    """Shopping cart entity tracking items and state."""
+
+    source_event = None  # Carts are created when first product is added
+    primary_key = "cart_id"
+
+    user_id: str = StateField(type_=str)
+    item_count: int = StateField(default=0, type_=int)
+    total_value: float = StateField(default=0.0, type_=float)
+    checkout_started: bool = StateField(default=False, type_=bool)
+    last_updated: Optional[datetime] = StateField(default=None, type_=datetime)
+
+
+class Order(Entity):
+    """Order entity tracking purchase process."""
+
+    source_event = CheckoutStarted
+    primary_key = "order_id"
+
+    user_id: str = StateField(type_=str)
+    cart_id: str = StateField(type_=str)
+    status: str = StateField(
+        default="pending", type_=str
+    )  # pending, completed, cancelled
+    has_shipping_info: bool = StateField(default=False, type_=bool)
+    has_payment_info: bool = StateField(default=False, type_=bool)
+    total_amount: float = StateField(default=0.0, type_=float)
 
 
 # Create simulation
 sim = Simulation(
-    duration="5m",  # 5 minute simulation
+    duration="5m",  # 5 minute simulation for testing
     start_time="now",
     random_seed=42,
     initial_entities={
-        User: 25,  # Start with 25 users
-        Product: 15,  # Start with 15 products
+        User: 25,  # Start with 25 registered users
+        Product: 8,  # Start with 8 products
     },
+    n_flows=2,  # Allow multiple concurrent flows
 )
 
 
 # Define flows
-@sim.flow(initiation_weight=3.0)
-def new_user_registration(ctx: Context):
-    """A new user registers and might log in."""
-    yield NewEvent(ctx, UserRegistered, save_entity=User)
-    yield AddDecay(ctx, rate=0.2, seconds=10)  # 20% chance to drop off
+@sim.flow(initiation_weight=2.0)
+def new_user_registration(ctx: FlowContext):
+    """A new user creates an account."""
+    yield NewEvent(ctx, AccountCreated, save_entity=User)
+
+
+@sim.flow(
+    initiation_weight=5.0, filter=Select(User, where=[("is_logged_in", "is", False)])
+)
+def user_login_and_search(ctx: FlowContext):
+    """User logs in and searches for products."""
+    # Start a session (implicit login)
+    session_id = f"sess_{ctx.session_id[:8]}"
+
+    # Update user state for login
     yield NewEvent(
         ctx,
-        UserLoggedIn,
+        Search,
+        session_id=session_id,
         mutate=SetState(
-            User, [("is_logged_in", "is", True), ("last_login", "is", ctx.current_time)]
+            User,
+            [("is_logged_in", "is", True), ("current_session_id", "is", session_id)],
         ),
     )
 
@@ -128,63 +342,194 @@ def new_user_registration(ctx: Context):
 @sim.flow(
     initiation_weight=8.0, filter=Select(User, where=[("is_logged_in", "is", True)])
 )
-def user_browsing_session(ctx: Context):
-    """A logged-in user browses and might purchase products."""
-    # Browse a product (use a dummy product ID for now)
-    yield NewEvent(ctx, ProductViewed, product_id="PRODUCT_001")
-    yield AddDecay(ctx, rate=0.3, seconds=15)
+def product_browsing_flow(ctx: FlowContext):
+    """User browses and clicks on products."""
+    user = ctx.get_entity(User)
+    if not user:
+        return
 
-    # Maybe add to cart
+    # Get a random product
+    products = ctx.global_context.get_entities(Product)
+    if not products:
+        return
+
+    import random
+
+    product = random.choice(products)
+
+    # Click on product
     yield NewEvent(
         ctx,
-        AddToCart,
-        product_id="PRODUCT_001",
-        mutate=SetState(User, [("cart_items", "add", 1)]),
+        ProductClicked,
+        session_id=user.current_session_id,
+        product_id=product.get_primary_key(),
+        product_name=product.name,
+        price=product.price,
+        mutate=SetState(Product, [("click_count", "add", 1)]),
     )
-    yield AddDecay(ctx, rate=0.5, seconds=30)
 
-    # Maybe purchase
-    purchase_event = NewEvent(
+    yield AddDecay(ctx, rate=0.3, seconds=5)
+
+    # View product details
+    yield NewEvent(
         ctx,
-        Purchase,
-        product_id="PRODUCT_001",
-        quantity=1,
-        unit_price=99.99,
-        total_amount=99.99,
-        mutate=SetState(
-            User,
-            [
-                ("total_purchases", "add", 1),
-                ("cart_items", "subtract", 1),
-                ("total_spent", "add", 99.99),
-            ],
-        ),
+        ProductDetailsViewed,
+        session_id=user.current_session_id,
+        product_id=product.get_primary_key(),
+        mutate=SetState(Product, [("view_count", "add", 1)]),
     )
-    yield purchase_event
-    yield AddDecay(ctx, rate=0.7, seconds=60)
-
-    # Maybe leave a review
-    yield NewEvent(ctx, ProductReview, product_id="PRODUCT_001")
 
 
 @sim.flow(
-    initiation_weight=5.0, filter=Select(User, where=[("is_logged_in", "is", False)])
+    initiation_weight=6.0, filter=Select(User, where=[("is_logged_in", "is", True)])
 )
-def returning_user_login(ctx: Context):
-    """An existing user logs in."""
+def add_to_cart_flow(ctx: FlowContext):
+    """User adds products to cart."""
+    user = ctx.get_entity(User)
+    if not user:
+        return
+
+    # Get or create cart
+    cart_id = user.cart_id
+    if not cart_id:
+        cart_id = f"cart_{ctx.session_id[:8]}"
+
+    # Get a random product
+    products = ctx.global_context.get_entities(Product)
+    if not products:
+        return
+
+    import random
+
+    product = random.choice(products)
+    quantity = random.randint(1, 3)
+
+    # Add to cart
     yield NewEvent(
         ctx,
-        UserLoggedIn,
+        ProductAdded,
+        session_id=user.current_session_id,
+        product_id=product.get_primary_key(),
+        cart_id=cart_id,
+        quantity=quantity,
+        unit_price=product.price,
+        mutate=SetState(User, [("cart_id", "is", cart_id)]),
+    )
+
+
+@sim.flow(
+    initiation_weight=4.0, filter=Select(User, where=[("cart_id", "is_not", None)])
+)
+def checkout_flow(ctx: FlowContext):
+    """User goes through checkout process."""
+    user = ctx.get_entity(User)
+    if not user or not user.cart_id:
+        return
+
+    # Start checkout
+    cart_total = 150.0 + (hash(user.cart_id) % 100)  # Simulated cart total
+    cart_size = (hash(user.cart_id) % 3) + 1
+
+    order_id = f"order_{ctx.session_id[:8]}"
+
+    yield NewEvent(
+        ctx,
+        CheckoutStarted,
+        session_id=user.current_session_id,
+        cart_id=user.cart_id,
+        cart_total=cart_total,
+        cart_size=cart_size,
+        save_entity=Order,
+    )
+
+    yield AddDecay(ctx, rate=0.4, seconds=30)  # 40% abandon at checkout
+
+    # Add shipping info
+    yield NewEvent(
+        ctx,
+        ShippingInfoAdded,
+        session_id=user.current_session_id,
+        order_id=order_id,
+        mutate=SetState(Order, [("has_shipping_info", "is", True)]),
+    )
+
+    yield AddDecay(ctx, rate=0.3, seconds=15)
+
+    # Add payment info
+    yield NewEvent(
+        ctx,
+        PaymentInfoAdded,
+        session_id=user.current_session_id,
+        order_id=order_id,
+        mutate=SetState(Order, [("has_payment_info", "is", True)]),
+    )
+
+    yield AddDecay(ctx, rate=0.2, seconds=10)
+
+    # Complete order
+    revenue = cart_total * 0.9  # Before tax
+    tax = revenue * 0.08
+    shipping = 8.99
+
+    yield NewEvent(
+        ctx,
+        OrderCompleted,
+        session_id=user.current_session_id,
+        order_id=order_id,
+        order_total=cart_total,
+        revenue=revenue,
+        tax=tax,
+        shipping_cost=shipping,
+        item_count=cart_size,
         mutate=SetState(
-            User, [("is_logged_in", "is", True), ("last_login", "is", ctx.current_time)]
+            User,
+            [
+                ("total_orders", "add", 1),
+                ("total_spent", "add", cart_total),
+                ("cart_id", "is", None),  # Clear cart
+            ],
         ),
     )
 
 
 @sim.flow(initiation_weight=1.5)
-def new_product_listing(ctx: Context):
-    """New products get added to the catalog."""
-    yield NewEvent(ctx, ProductCreated, save_entity=Product)
+def error_flow(ctx: FlowContext):
+    """Simulate various errors that can occur."""
+    user = ctx.get_entity(User) if ctx.selected_entities else None
+    user_id = user.get_primary_key() if user else None
+
+    yield NewEvent(ctx, ErrorTriggered, user_id=user_id)
+
+
+@sim.flow(
+    initiation_weight=1.0,
+    filter=Select(User, where=[("total_orders", "greater_than", 0)]),
+)
+def order_management_flow(ctx: FlowContext):
+    """Existing customers might edit or cancel orders."""
+    user = ctx.get_entity(User)
+    if not user:
+        return
+
+    order_id = f"order_{ctx.session_id[:8]}"
+
+    # 70% chance to edit, 30% to cancel
+    import random
+
+    if random.random() < 0.7:
+        yield NewEvent(
+            ctx,
+            OrderEdited,
+            session_id=user.current_session_id or f"sess_{ctx.session_id[:8]}",
+            order_id=order_id,
+        )
+    else:
+        yield NewEvent(
+            ctx,
+            OrderCancelled,
+            session_id=user.current_session_id or f"sess_{ctx.session_id[:8]}",
+            order_id=order_id,
+        )
 
 
 # Configure outputs
@@ -192,6 +537,8 @@ sim.add_output(StdOutOutput())
 
 # The simulation will be run by the CLI
 if __name__ == "__main__":
-    print("E-commerce Simulation")
-    print("====================")
+    print("Realistic E-commerce Simulation")
+    print("==============================")
+    print("Based on standard e-commerce events taxonomy")
+    print()
     sim.run()

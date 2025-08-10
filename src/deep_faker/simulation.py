@@ -167,7 +167,8 @@ class Simulation:
         self, flow_def: FlowDefinition, flow_start_time: datetime
     ) -> FlowContext:
         """Create flow context for flow execution."""
-        flow_ctx = self.global_context.start_flow(flow_start_time)
+        flow_name = getattr(flow_def.func, "__name__", "unknown_flow")
+        flow_ctx = self.global_context.start_flow(flow_start_time, flow_name)
 
         # Select and assign entity if filter condition exists
         if flow_def.filter_condition:
