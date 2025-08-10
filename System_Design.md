@@ -250,3 +250,32 @@ if __name__ == "__main__":
    1. One example for E-commerce focused event simulation
    2. One example for Trading platform event simulation
 3. Both end to end tests should be runnable with pytest and both should pass.
+
+## Context and state
+
+1. The simulation should maintain a global state which stores
+   - Available entities, this include:
+     * Historical entities, that are created before the simulation by `initial_entities`
+     * Created entities during the simulation
+     * Entities that are taken by a running flow should be marked as Active Entities, and should be excluded from available entities.
+     * Available entities are used for initilzing flows:
+     * For example if a flow has filter `filter=Select(User, where=[("is_logged_in", "is", True)])`. It means the flow will randomly select from available entities whose `is_logged_in is True`.
+   - Clock, global clock determins the start time of each flow.
+
+2. In addition to the global context, we also need a flow context. Flow context maintains the state of the flow, it stores
+   - session_id, all the events emitted from the flow should have the same context
+   - clock, all the time mutation inside the flow, like `AddDecay` manimulates the flow clock. 
+
+## Simulation Setup 
+Let's set the simulation to accept start time, time step and number of flows. Pseudo code for flow selection should be somthing like:
+
+```
+ctx = create_global_context()
+while ti < t_end:
+    tj = ti + t_step
+    for _ in range(n_flows):
+        tf = random(ti, tj)  # randomly select a time between ti, tj
+        flow = selct_one_flow()
+        session = ctx.start_flow()
+        flow.run(ctx, session)
+```

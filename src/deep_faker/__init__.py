@@ -1,6 +1,14 @@
 """Deep Faker - Python-Native Event Mocking Library."""
 
-from .actions import AddDecay, Context, NewEvent, Select, SetState
+from .actions import (
+    AddDecay,
+    Context,
+    FlowContext,
+    GlobalContext,
+    NewEvent,
+    Select,
+    SetState,
+)
 from .base import BaseEvent, Entity, Field, StateField
 from .outputs import FileOutput, KafkaOutput, MySQLOutput, StdOutOutput
 from .simulation import Simulation
@@ -12,7 +20,9 @@ __all__ = [
     "Field",
     "Entity",
     "StateField",
-    "Context",
+    "Context",  # Legacy - will be deprecated
+    "FlowContext",  # New flow context
+    "GlobalContext",  # New global context
     "NewEvent",
     "AddDecay",
     "Select",

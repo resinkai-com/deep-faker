@@ -7,7 +7,15 @@ from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from faker import Faker
 
-from .actions import AddDecay, Context, NewEvent, Select, SetState
+from .actions import (
+    AddDecay,
+    Context,
+    FlowContext,
+    GlobalContext,
+    NewEvent,
+    Select,
+    SetState,
+)
 from .base import BaseEvent, Entity, generate_fake_data
 
 
@@ -67,23 +75,31 @@ class Simulation:
         self,
         duration: str = "1h",
         start_time: Union[str, datetime] = "now",
+        time_step: str = "1s",
+        n_flows: int = 1,
         random_seed: Optional[int] = None,
         initial_entities: Optional[Dict[Union[str, Type[Entity]], int]] = None,
     ):
         self.duration = self._parse_duration(duration)
         self.start_time = self._parse_start_time(start_time)
+        self.time_step = self._parse_duration(time_step)
+        self.n_flows = n_flows
         self.random_seed = random_seed
         self.initial_entities = initial_entities or {}
 
         self.flows: List[FlowDefinition] = []
         self.outputs = []
-        self.entity_manager = EntityManager()
+        self.global_context = GlobalContext(self.start_time)
         self.faker = Faker()
-        self.current_time = self.start_time
 
         if random_seed is not None:
             random.seed(random_seed)
             self.faker.seed_instance(random_seed)
+
+    @property
+    def entity_manager(self):
+        """Backward compatibility property for global_context."""
+        return self.global_context
 
     def _parse_duration(self, duration: str) -> timedelta:
         """Parse duration string like '1h', '30m', '2d'."""
@@ -136,7 +152,7 @@ class Simulation:
                     # Generate fake event data and create entity
                     event_data = self._generate_event_data(entity_type.source_event)
                     entity = entity_type(**event_data)
-                    self.entity_manager.add_entity(entity_type, entity)
+                    self.global_context.add_entity(entity_type, entity)
 
     def _find_entity_type_by_name(self, name: str) -> Optional[Type[Entity]]:
         """Find entity type by class name."""
@@ -144,13 +160,19 @@ class Simulation:
         # For now, we'll return None and handle in the implementation
         return None
 
-    def _generate_event_data(self, event_schema: Type[BaseEvent]) -> Dict[str, Any]:
+    def _generate_event_data(
+        self, event_schema: Type[BaseEvent], current_time: datetime = None
+    ) -> Dict[str, Any]:
         """Generate fake data for an event schema."""
         data = {}
 
+        # Use global context time if no specific time provided
+        if current_time is None:
+            current_time = self.global_context.global_clock
+
         # Get field annotations
         for field_name, field_info in event_schema.model_fields.items():
-            fake_value = generate_fake_data(field_info, self.faker, self.current_time)
+            fake_value = generate_fake_data(field_info, self.faker, current_time)
             if fake_value is not None:
                 data[field_name] = fake_value
 
@@ -163,7 +185,7 @@ class Simulation:
         for flow_def in self.flows:
             # Check filter condition
             if flow_def.filter_condition:
-                matching_entities = self.entity_manager.select_entities(
+                matching_entities = self.global_context.select_entities(
                     flow_def.filter_condition
                 )
                 if not matching_entities:
@@ -178,61 +200,67 @@ class Simulation:
         weights = [flow.initiation_weight for flow in eligible_flows]
         return random.choices(eligible_flows, weights=weights)[0]
 
-    def _create_context(self, flow_def: FlowDefinition) -> Context:
-        """Create context for flow execution."""
-        selected_entity = None
+    def _create_flow_context(
+        self, flow_def: FlowDefinition, flow_start_time: datetime
+    ) -> FlowContext:
+        """Create flow context for flow execution."""
+        flow_ctx = self.global_context.start_flow(flow_start_time)
 
+        # Select and assign entity if filter condition exists
         if flow_def.filter_condition:
-            matching_entities = self.entity_manager.select_entities(
+            matching_entities = self.global_context.select_entities(
                 flow_def.filter_condition
             )
             if matching_entities:
                 selected_entity = random.choice(matching_entities)
+                flow_ctx.selected_entity = selected_entity
+                flow_ctx.add_entity(type(selected_entity), selected_entity)
 
-        # Create a unique session ID for this flow execution
-        session_id = str(uuid.uuid4())
-        ctx = Context(self, self.current_time, selected_entity, session_id)
-        return ctx
+        return flow_ctx
 
-    def _process_action(self, action, ctx: Context):
+    def _process_action(self, action, flow_ctx: FlowContext):
         """Process a single action from a flow."""
         if isinstance(action, NewEvent):
-            self._process_new_event(action, ctx)
+            self._process_new_event(action, flow_ctx)
         elif isinstance(action, AddDecay):
-            return self._process_add_decay(action, ctx)
+            return self._process_add_decay(action, flow_ctx)
         elif isinstance(action, SetState):
-            self._process_set_state(action, ctx)
+            self._process_set_state(action, flow_ctx)
 
         return False  # Continue flow
 
-    def _process_new_event(self, action: NewEvent, ctx: Context):
+    def _process_new_event(self, action: NewEvent, flow_ctx: FlowContext):
         """Process NewEvent action."""
-        # Generate event data
-        event_data = self._generate_event_data(action.event_schema)
+        # Generate event data using flow's current time
+        event_data = self._generate_event_data(action.event_schema, flow_ctx.flow_clock)
 
         # Populate primary key fields from entities in context
-        self._populate_primary_keys_from_context(event_data, action.event_schema, ctx)
+        self._populate_primary_keys_from_context(
+            event_data, action.event_schema, flow_ctx
+        )
 
         # Apply field overrides
         event_data.update(action.field_overrides)
 
         # Populate standard event metadata fields
-        self._populate_event_metadata(event_data, ctx)
+        self._populate_event_metadata(event_data, flow_ctx)
 
         # Create event instance
         event = action.event_schema(**event_data)
 
         # Save entity if specified
         if action.save_entity:
-            entity = action.save_entity(**event_data)
-            self.entity_manager.add_entity(action.save_entity, entity)
+            entity = action.save_entity(
+                **event_data
+            )  # action.save_entity = User, Product etc.
+            self.global_context.add_entity(action.save_entity, entity)
             # Track the created entity in context for subsequent actions
-            ctx.add_entity(action.save_entity, entity)
+            flow_ctx.add_entity(action.save_entity, entity)
 
         # Apply mutations
         if action.mutate:
             # Get the target entity for mutation
-            target_entity = ctx.get_entity(action.mutate.entity_type)
+            target_entity = flow_ctx.get_entity(action.mutate.entity_type)
             if target_entity:
                 target_entity.update_state(action.mutate.updates)
 
@@ -241,7 +269,10 @@ class Simulation:
             output.send_event(event)
 
     def _populate_primary_keys_from_context(
-        self, event_data: Dict[str, Any], event_schema: Type[BaseEvent], ctx: Context
+        self,
+        event_data: Dict[str, Any],
+        event_schema: Type[BaseEvent],
+        flow_ctx: FlowContext,
     ):
         """Populate primary key fields in event data from entities in context."""
         # Check each field in the event schema
@@ -251,72 +282,136 @@ class Simulation:
                 continue
 
             # Look for an entity that has this field as its primary key
-            for entity_type, entity in ctx.entities_by_type.items():
+            for entity_type, entity in flow_ctx.entities_by_type.items():
                 if entity.primary_key == field_name:
                     pk_value = entity.get_primary_key()
                     if pk_value is not None:
                         event_data[field_name] = pk_value
                         break
 
-    def _populate_event_metadata(self, event_data: Dict[str, Any], ctx: Context):
+    def _populate_event_metadata(
+        self, event_data: Dict[str, Any], flow_ctx: FlowContext
+    ):
         """Populate standard event metadata fields."""
         import uuid
 
         # Generate unique event ID
-        event_data["_event_id"] = str(uuid.uuid4())
+        event_data["event_id_"] = str(uuid.uuid4())
 
-        # Set event timestamp in milliseconds
-        timestamp_ms = int(self.current_time.timestamp() * 1000)
-        event_data["_event_ts"] = timestamp_ms
+        # Set event timestamp in milliseconds using flow clock
+        timestamp_ms = int(flow_ctx.flow_clock.timestamp() * 1000)
+        event_data["event_ts_"] = timestamp_ms
 
         # Set session ID from context
-        event_data["_session_id"] = ctx.session_id
+        event_data["session_id_"] = flow_ctx.session_id
 
-    def _process_add_decay(self, action: AddDecay, ctx: Context) -> bool:
+    def _process_add_decay(self, action: AddDecay, flow_ctx: FlowContext) -> bool:
         """Process AddDecay action. Returns True if flow should terminate."""
-        # Advance time
-        self.current_time += action.time_delta
+        # Advance flow time
+        flow_ctx.advance_time(action.time_delta)
 
         # Check for termination
         return random.random() < action.rate
 
-    def _process_set_state(self, action: SetState, ctx: Context):
+    def _process_set_state(self, action: SetState, flow_ctx: FlowContext):
         """Process SetState action."""
-        if ctx.selected_entity and isinstance(ctx.selected_entity, action.entity_type):
-            ctx.selected_entity.update_state(action.updates)
+        if flow_ctx.selected_entity and isinstance(
+            flow_ctx.selected_entity, action.entity_type
+        ):
+            flow_ctx.selected_entity.update_state(action.updates)
 
     def run(self):
-        """Run the simulation."""
-        print(f"Starting simulation for {self.duration}")
+        """Run the simulation using the new time-step based approach."""
+        print(
+            f"Starting simulation for {self.duration} with time_step={self.time_step} and n_flows={self.n_flows}"
+        )
 
         # Initialize entities
         self._initialize_entities()
 
         end_time = self.start_time + self.duration
+        ti = self.start_time
 
-        while self.current_time < end_time:
-            # Select and run a flow
-            flow_def = self._select_flow()
-            if not flow_def:
-                # No eligible flows, advance time and continue
-                self.current_time += timedelta(seconds=1)
-                continue
+        while ti < end_time:
+            tj = ti + self.time_step
+            if tj > end_time:
+                tj = end_time
 
-            # Create context and run flow
-            ctx = self._create_context(flow_def)
-            flow_generator = flow_def.func(ctx)
+            # Update global context time
+            self.global_context.global_clock = ti
 
-            try:
-                # Execute flow actions
-                for action in flow_generator:
-                    should_terminate = self._process_action(action, ctx)
-                    if should_terminate:
-                        break
+            # Launch n_flows concurrent flows in this time step
+            active_flows = []
 
-            except StopIteration:
-                pass
+            for _ in range(self.n_flows):
+                # Select a flow
+                flow_def = self._select_flow()
+                if not flow_def:
+                    continue
 
-        print(f"Simulation completed at {self.current_time}")
+                # Random start time within [ti, tj)
+                if ti == tj:
+                    tf = ti
+                else:
+                    delta_seconds = (tj - ti).total_seconds()
+                    random_offset = random.random() * delta_seconds
+                    tf = ti + timedelta(seconds=random_offset)
+
+                # Create flow context
+                flow_ctx = self._create_flow_context(flow_def, tf)
+
+                # Start flow execution
+                flow_info = {
+                    "flow_def": flow_def,
+                    "flow_ctx": flow_ctx,
+                    "generator": flow_def.func(flow_ctx),
+                    "active": True,
+                }
+                active_flows.append(flow_info)
+
+            # Execute all active flows until completion or time step end
+            while active_flows:
+                completed_flows = []
+
+                for i, flow_info in enumerate(active_flows):
+                    if not flow_info["active"]:
+                        completed_flows.append(i)
+                        continue
+
+                    try:
+                        # Get next action from flow
+                        action = next(flow_info["generator"])
+
+                        # Process the action
+                        should_terminate = self._process_action(
+                            action, flow_info["flow_ctx"]
+                        )
+                        if should_terminate:
+                            flow_info["active"] = False
+                            completed_flows.append(i)
+
+                        # If flow time exceeds time step, pause it (this is simplified)
+                        if flow_info["flow_ctx"].flow_clock > tj:
+                            # In a more complex implementation, we might reschedule
+                            flow_info["active"] = False
+                            completed_flows.append(i)
+
+                    except StopIteration:
+                        # Flow completed naturally
+                        flow_info["active"] = False
+                        completed_flows.append(i)
+
+                # Remove completed flows (in reverse order to maintain indices)
+                for i in reversed(completed_flows):
+                    if i < len(active_flows):  # Safety check
+                        flow = active_flows[i]
+                        flow["flow_ctx"].cleanup()  # Release entities
+                        active_flows.pop(i)
+
+            # Advance to next time step
+            ti = tj
+
+        print(f"Simulation completed at {ti}")
 
         # Clean up outputs
         for output in self.outputs:

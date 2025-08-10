@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, List, Optional, Type
 
 import pydantic
 from faker import Faker
@@ -53,7 +53,9 @@ class BaseEvent(pydantic.BaseModel):
 
     # Standard event metadata fields
     event_id_: str = Field(faker="uuid4")  # Unique ID for each event
-    event_ts_: int = Field(default=0)  # Event timestamp in milliseconds (set by simulation)
+    event_ts_: int = Field(
+        default=0
+    )  # Event timestamp in milliseconds (set by simulation)
     session_id_: str = Field(default="")  # Session ID for the flow (set by simulation)
 
 
@@ -131,7 +133,9 @@ class Entity(metaclass=EntityMeta):
 
 
 def generate_fake_data(
-    field_info: pydantic.fields.FieldInfo, faker_instance: Faker, current_time: Optional[datetime] = None
+    field_info: pydantic.fields.FieldInfo,
+    faker_instance: Faker,
+    current_time: Optional[datetime] = None,
 ) -> Any:
     """Generate fake data based on field configuration."""
     # Extract faker metadata from json_schema_extra
