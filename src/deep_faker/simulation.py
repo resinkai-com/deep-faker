@@ -260,8 +260,16 @@ class Simulation:
         """Populate standard event metadata fields."""
         import uuid
 
+        try:
+            import shortuuid
+        except ImportError:
+            shortuuid = None
+
         # Generate unique event ID
-        event_data["sys__eid"] = str(uuid.uuid4())
+        if shortuuid:
+            event_data["sys__eid"] = shortuuid.uuid()[:12]  # 12 character short UUID
+        else:
+            event_data["sys__eid"] = str(uuid.uuid4()).replace("-", "")[:12]  # Fallback
 
         # Set event timestamp in milliseconds using flow clock
         timestamp_ms = int(flow_ctx.flow_clock.timestamp() * 1000)

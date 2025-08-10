@@ -82,9 +82,14 @@ class GlobalContext:
         self, flow_start_time: datetime, flow_name: str = None
     ) -> "FlowContext":
         """Start a new flow and return its context."""
-        session_id = str(uuid.uuid4())
+        try:
+            import shortuuid
+
+            session_id = shortuuid.uuid()[:8]  # 8 character session ID
+        except ImportError:
+            session_id = str(uuid.uuid4()).replace("-", "")[:8]  # Fallback
         if flow_name is None:
-            flow_name = f"flow_{session_id[:8]}"
+            flow_name = f"flow_{session_id}"
         return FlowContext(self, session_id, flow_start_time, flow_name)
 
 
@@ -190,7 +195,15 @@ class Context:
         # Track entities by type - allows multiple entities per flow
         self.entities_by_type: Dict[Type[Entity], Entity] = {}
         # Session ID for this flow execution
-        self.session_id = session_id or str(uuid.uuid4())
+        if session_id:
+            self.session_id = session_id
+        else:
+            try:
+                import shortuuid
+
+                self.session_id = shortuuid.uuid()[:8]  # 8 character session ID
+            except ImportError:
+                self.session_id = str(uuid.uuid4()).replace("-", "")[:8]  # Fallback
 
         # If we have a selected entity, add it to the entities_by_type
         if selected_entity:

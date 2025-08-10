@@ -7,6 +7,13 @@ from typing import Any, List, Optional, Type
 import pydantic
 from faker import Faker
 
+try:
+    import shortuuid
+
+    SHORTUUID_AVAILABLE = True
+except ImportError:
+    SHORTUUID_AVAILABLE = False
+
 
 def Field(
     *,
@@ -21,7 +28,7 @@ def Field(
     pydantic_params = {}
 
     # Parameters that should go in json_schema_extra for faker
-    faker_keys = {"positive", "min_value", "max_value", "min", "max", "text"}
+    faker_keys = {"positive", "min_value", "max_value", "min", "max", "text", "length"}
 
     for key, value in kwargs.items():
         if key in faker_keys:
@@ -52,7 +59,7 @@ class BaseEvent(pydantic.BaseModel):
     )
 
     # Standard event metadata fields
-    sys__eid: str = Field(faker="uuid4")  # Unique ID for each event
+    sys__eid: str = Field(faker="shortuuid", length=12)  # Unique ID for each event
     sys__ets: int = Field(
         default=0
     )  # Event timestamp in milliseconds (set by simulation)
@@ -151,6 +158,14 @@ def generate_fake_data(
 
     if faker_type == "uuid4":
         return str(uuid.uuid4())
+    elif faker_type == "shortuuid":
+        if not SHORTUUID_AVAILABLE:
+            # Fallback to regular UUID if shortuuid not available
+            length = extra.get("length", 8)  # Default shorter length for fallback
+            return str(uuid.uuid4()).replace("-", "")[:length]
+        length = extra.get("length", 22)  # Default shortuuid length is 22
+        generated = shortuuid.uuid()
+        return generated[:length] if length < len(generated) else generated
     elif faker_type == "now":
         return current_time if current_time is not None else datetime.now()
     elif faker_type == "name":
