@@ -1,7 +1,6 @@
 """Action classes for declarative flow definitions."""
 
 import random
-import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Type, Union
 
@@ -82,12 +81,9 @@ class GlobalContext:
         self, flow_start_time: datetime, flow_name: str = None
     ) -> "FlowContext":
         """Start a new flow and return its context."""
-        try:
-            import shortuuid
+        import shortuuid
 
-            session_id = shortuuid.uuid()[:8]  # 8 character session ID
-        except ImportError:
-            session_id = str(uuid.uuid4()).replace("-", "")[:8]  # Fallback
+        session_id = shortuuid.uuid()[:8]  # 8 character session ID
         if flow_name is None:
             flow_name = f"flow_{session_id}"
         return FlowContext(self, session_id, flow_start_time, flow_name)
@@ -198,12 +194,9 @@ class Context:
         if session_id:
             self.session_id = session_id
         else:
-            try:
-                import shortuuid
+            import shortuuid
 
-                self.session_id = shortuuid.uuid()[:8]  # 8 character session ID
-            except ImportError:
-                self.session_id = str(uuid.uuid4()).replace("-", "")[:8]  # Fallback
+            self.session_id = shortuuid.uuid()[:8]  # 8 character session ID
 
         # If we have a selected entity, add it to the entities_by_type
         if selected_entity:

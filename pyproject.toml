@@ -1,7 +1,7 @@
 [project]
 name = "deep-faker"
 version = "0.0.1"
-description = "Python-Native Event Mocking"
+description = "Python-Native Fake Event Generator"
 readme = "README.md"
 authors = [{ name = "resink.ai", email = "shijing.lu@resink.ai" }]
 requires-python = ">=3.9"

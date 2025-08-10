@@ -5,14 +5,8 @@ from datetime import datetime
 from typing import Any, List, Optional, Type
 
 import pydantic
+import shortuuid
 from faker import Faker
-
-try:
-    import shortuuid
-
-    SHORTUUID_AVAILABLE = True
-except ImportError:
-    SHORTUUID_AVAILABLE = False
 
 
 def Field(
@@ -159,10 +153,6 @@ def generate_fake_data(
     if faker_type == "uuid4":
         return str(uuid.uuid4())
     elif faker_type == "shortuuid":
-        if not SHORTUUID_AVAILABLE:
-            # Fallback to regular UUID if shortuuid not available
-            length = extra.get("length", 8)  # Default shorter length for fallback
-            return str(uuid.uuid4()).replace("-", "")[:length]
         length = extra.get("length", 22)  # Default shortuuid length is 22
         generated = shortuuid.uuid()
         return generated[:length] if length < len(generated) else generated
