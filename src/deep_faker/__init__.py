@@ -10,6 +10,7 @@ from .actions import (
     SetState,
 )
 from .base import BaseEvent, Entity, Field, StateField
+from .entity_manager import EntityManager
 from .outputs import FileOutput, KafkaOutput, MySQLOutput, StdOutOutput
 from .simulation import Simulation
 
@@ -20,6 +21,7 @@ __all__ = [
     "Field",
     "Entity",
     "StateField",
+    "EntityManager",
     "Context",  # Legacy - will be deprecated
     "FlowContext",  # New flow context
     "GlobalContext",  # New global context

@@ -3,9 +3,10 @@
 import random
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Type, Union
+from typing import Dict, List, Optional, Set, Tuple, Type, Union
 
 from .base import BaseEvent, Entity
+from .entity_manager import EntityManager
 
 
 class GlobalContext:
@@ -13,50 +14,51 @@ class GlobalContext:
 
     def __init__(self, start_time: datetime):
         self.global_clock = start_time
-        self.available_entities: Dict[Type[Entity], Dict[str, Entity]] = {}
-        self.active_entities: Dict[Type[Entity], Set[str]] = {}
+        self.entity_manager = EntityManager()
 
     def add_entity(self, entity_type: Type[Entity], entity: Entity):
-        """Add an entity to available entities."""
-        if entity_type not in self.available_entities:
-            self.available_entities[entity_type] = {}
-        if entity_type not in self.active_entities:
-            self.active_entities[entity_type] = set()
-
-        pk = entity.get_primary_key()
-        self.available_entities[entity_type][pk] = entity
+        """Add an entity with its initial state."""
+        self.entity_manager.add_entity(entity_type, entity, self.global_clock)
 
     def get_available_entities(self, entity_type: Type[Entity]) -> List[Entity]:
         """Get all available (non-active) entities of a given type."""
-        if entity_type not in self.available_entities:
-            return []
-
-        available = []
-        active_keys = self.active_entities.get(entity_type, set())
-
-        for pk, entity in self.available_entities[entity_type].items():
-            if pk not in active_keys:
-                available.append(entity)
-
-        return available
+        available_data = self.entity_manager.get_available_entities(
+            entity_type, time=self.global_clock
+        )
+        entities = []
+        for entity_id, entity_state in available_data:
+            entity = self.entity_manager.create_entity_instance(
+                entity_type, entity_id, self.global_clock
+            )
+            if entity:
+                entities.append(entity)
+        return entities
 
     def select_entities(self, selector: "Select") -> List[Entity]:
         """Select available entities based on filter conditions."""
-        available_entities = self.get_available_entities(selector.entity_type)
-        return [entity for entity in available_entities if selector.matches(entity)]
+        available_data = self.entity_manager.get_available_entities(
+            entity_type=selector.entity_type,
+            where=selector.where,
+            time=self.global_clock,
+        )
+        entities = []
+        for entity_id, entity_state in available_data:
+            entity = self.entity_manager.create_entity_instance(
+                selector.entity_type, entity_id, self.global_clock
+            )
+            if entity:
+                entities.append(entity)
+        return entities
 
     def mark_entity_active(self, entity_type: Type[Entity], entity: Entity):
         """Mark an entity as active (being used by a flow)."""
-        if entity_type not in self.active_entities:
-            self.active_entities[entity_type] = set()
-        pk = entity.get_primary_key()
-        self.active_entities[entity_type].add(pk)
+        entity_id = entity.get_primary_key()
+        self.entity_manager.mark_entity_active(entity_type, entity_id)
 
     def mark_entity_available(self, entity_type: Type[Entity], entity: Entity):
         """Mark an entity as available (no longer being used by a flow)."""
-        if entity_type in self.active_entities:
-            pk = entity.get_primary_key()
-            self.active_entities[entity_type].discard(pk)
+        entity_id = entity.get_primary_key()
+        self.entity_manager.mark_entity_available(entity_type, entity_id)
 
     def get_random_available_entity(
         self, entity_type: Type[Entity]
@@ -67,9 +69,15 @@ class GlobalContext:
 
     def get_entities(self, entity_type: Type[Entity]) -> List[Entity]:
         """Backward compatibility method - returns all entities including active ones."""
-        if entity_type not in self.available_entities:
-            return []
-        return list(self.available_entities[entity_type].values())
+        all_data = self.entity_manager.get_all_entities(entity_type, self.global_clock)
+        entities = []
+        for entity_id, entity_state in all_data:
+            entity = self.entity_manager.create_entity_instance(
+                entity_type, entity_id, self.global_clock
+            )
+            if entity:
+                entities.append(entity)
+        return entities
 
     def start_flow(self, flow_start_time: datetime) -> "FlowContext":
         """Start a new flow and return its context."""
@@ -86,46 +94,75 @@ class FlowContext:
         self.global_context = global_context
         self.session_id = session_id
         self.flow_clock = start_time
-        self.selected_entity: Optional[Entity] = None
-        self.entities_by_type: Dict[Type[Entity], Entity] = {}
-        self.active_entity_types: Set[Type[Entity]] = (
-            set()
-        )  # Track which entity types this flow is using
+        # Store selected entities by (entity_type, entity_id)
+        self.selected_entities: Dict[Type[Entity], str] = {}
 
     def add_entity(self, entity_type: Type[Entity], entity: Entity):
         """Add an entity to this flow context."""
-        self.entities_by_type[entity_type] = entity
-        self.active_entity_types.add(entity_type)
+        entity_id = entity.get_primary_key()
+        self.selected_entities[entity_type] = entity_id
         # Mark entity as active in global context
         self.global_context.mark_entity_active(entity_type, entity)
 
     def get_entity(self, entity_type: Type[Entity]) -> Optional[Entity]:
-        """Get an entity of the specified type from the flow context."""
-        return self.entities_by_type.get(entity_type)
+        """Get a selected entity of the specified type from the flow context."""
+        if entity_type not in self.selected_entities:
+            return None
+
+        entity_id = self.selected_entities[entity_type]
+        return self.global_context.entity_manager.create_entity_instance(
+            entity_type, entity_id, self.flow_clock
+        )
+
+    def get_entity_id(self, entity_type: Type[Entity]) -> Optional[str]:
+        """Get the ID of a selected entity."""
+        return self.selected_entities.get(entity_type)
 
     def advance_time(self, delta: timedelta):
         """Advance the flow clock."""
         self.flow_clock += delta
 
     def get_primary_entity(self) -> Optional[Entity]:
-        """Get the primary entity (selected or first created)."""
-        if self.selected_entity:
-            return self.selected_entity
-        if self.entities_by_type:
-            return next(iter(self.entities_by_type.values()))
+        """Get the primary entity (first selected entity)."""
+        if self.selected_entities:
+            # Return the first selected entity
+            entity_type = next(iter(self.selected_entities.keys()))
+            return self.get_entity(entity_type)
         return None
+
+    def mutate_selected_entity(self, entity_type: Type[Entity], updates: List[Tuple]):
+        """Mutate the state of a selected entity."""
+        if entity_type not in self.selected_entities:
+            raise ValueError(f"No {entity_type.__name__} entity selected for this flow")
+
+        entity_id = self.selected_entities[entity_type]
+        self.global_context.entity_manager.mutate_state(
+            entity_type, entity_id, updates, self.flow_clock
+        )
 
     @property
     def current_time(self) -> datetime:
         """Backward compatibility property for flow_clock."""
         return self.flow_clock
 
+    @property
+    def entities_by_type(self) -> Dict[Type[Entity], Entity]:
+        """Backward compatibility property - creates entity instances on demand."""
+        entities = {}
+        for entity_type, entity_id in self.selected_entities.items():
+            entity = self.global_context.entity_manager.create_entity_instance(
+                entity_type, entity_id, self.flow_clock
+            )
+            if entity:
+                entities[entity_type] = entity
+        return entities
+
     def cleanup(self):
         """Mark all entities used by this flow as available again."""
-        for entity_type in self.active_entity_types:
-            if entity_type in self.entities_by_type:
-                entity = self.entities_by_type[entity_type]
-                self.global_context.mark_entity_available(entity_type, entity)
+        for entity_type, entity_id in self.selected_entities.items():
+            self.global_context.entity_manager.mark_entity_available(
+                entity_type, entity_id
+            )
 
 
 class Context:

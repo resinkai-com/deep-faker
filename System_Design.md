@@ -279,3 +279,31 @@ while ti < t_end:
         session = ctx.start_flow()
         flow.run(ctx, session)
 ```
+
+## Entity Management
+1. Each entity can have its own state, and that state is global. For example, if a user is logged in, it is global, it does not make sense that user is logged in one flow, but logged out in another at the same time.
+2. Entities can be attached to flows. This simplifies the API, for example `SetState(User, [("cart_items", "add", 1)])` mutates the state of the attached User entity of the flow.
+3. Let's use EntityManager in the global context and make it be able to handle entity state with versions
+   - The EntityManager should be able to track entitie state change across the simulation time range. Something like
+     (User, id:123, state:u123_state_1, valid_from:'2025-08-10 10:10:27.527910', valid_to:'2025-08-10 10:10:57.527910')
+     (User, id:123, state:u123_state_2, valid_from:'2025-08-10 10:10:57.527910', valid_to:None)
+   - The EntityManager allows querying entities at given time, like
+     * entity_manager.query(User, where=[("is_logged_in", "is", True)], time='2025-08-10 10:10:30.527910')
+   - if time parameter is not given, default to global clock current time.
+   - The EntityManager allows mutating state at given time, like:
+     * entity_manager.insert(User, where=[("user_id", "=", 123)], state=u123_state_3, time='2025-08-10 10:15:30.527910')
+     * this insert will update the previous state and set `valid_to` to the insert time.
+     * this insert will also create a new state period with `valid_from`  being the insert time and `valid_to` to None, like:
+     * > (User, id:123, state:u123_state_3, valid_from:'2025-08-10 10:15:30.527910', valid_to:None)
+4. In each flow, entity state can be mutated, this mutation should be applied to the global entity manager. For example `NewEvent(ctx, AddToCart, product_id="PRODUCT_001", mutate=SetState(User, [("cart_items", "add", 1)]))`. 
+
+
+## Implicit State, Implicity Mutation and Implicit Filtering
+- Entities can have customized state fields. On the other, some state are implicitly added to all events. For example `flow_name` is a state filed that tracks if the name of the flow which currently owns the entity. 
+- Also, some mutations are implicitly applied even they are not explictly expressed in any Actions. For example, `flow_name` state of attached entities will be set after entering a flow and it is removed before existing a flow. 
+- In addition to customized filters defined in the flow annotations, all flows have an implicity filter which is like `[('flow_name', 'is', 'None')]`
+
+
+Once the above implicit state, mutation and filtering are implemented, we can simplify the implementations:
+1. we don't need to maintain `active_entities` separtely in the `EntityManager`. `active_entities` are entities whose flow_name is None at the given time.
+2. we can remove functions like `mark_entity_active` or `mark_entity_available`. Entity states are set either explicitly or implicitly.

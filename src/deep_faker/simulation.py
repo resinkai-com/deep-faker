@@ -1,7 +1,6 @@
 """Core simulation engine and management classes."""
 
 import random
-import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
@@ -9,7 +8,6 @@ from faker import Faker
 
 from .actions import (
     AddDecay,
-    Context,
     FlowContext,
     GlobalContext,
     NewEvent,
@@ -31,41 +29,6 @@ class FlowDefinition:
         self.func = func
         self.initiation_weight = initiation_weight
         self.filter_condition = filter_condition
-
-
-class EntityManager:
-    """Manages entity instances and their state."""
-
-    def __init__(self):
-        self.entities: Dict[Type[Entity], Dict[Any, Entity]] = {}
-
-    def add_entity(self, entity_type: Type[Entity], entity: Entity):
-        """Add an entity to the manager."""
-        if entity_type not in self.entities:
-            self.entities[entity_type] = {}
-
-        primary_key = entity.get_primary_key()
-        self.entities[entity_type][primary_key] = entity
-
-    def get_entity(
-        self, entity_type: Type[Entity], primary_key: Any
-    ) -> Optional[Entity]:
-        """Get an entity by type and primary key."""
-        return self.entities.get(entity_type, {}).get(primary_key)
-
-    def get_entities(self, entity_type: Type[Entity]) -> List[Entity]:
-        """Get all entities of a given type."""
-        return list(self.entities.get(entity_type, {}).values())
-
-    def select_entities(self, selector: Select) -> List[Entity]:
-        """Select entities based on filter conditions."""
-        entities = self.get_entities(selector.entity_type)
-        return [entity for entity in entities if selector.matches(entity)]
-
-    def get_random_entity(self, entity_type: Type[Entity]) -> Optional[Entity]:
-        """Get a random entity of the given type."""
-        entities = self.get_entities(entity_type)
-        return random.choice(entities) if entities else None
 
 
 class Simulation:
@@ -213,7 +176,6 @@ class Simulation:
             )
             if matching_entities:
                 selected_entity = random.choice(matching_entities)
-                flow_ctx.selected_entity = selected_entity
                 flow_ctx.add_entity(type(selected_entity), selected_entity)
 
         return flow_ctx
@@ -259,10 +221,14 @@ class Simulation:
 
         # Apply mutations
         if action.mutate:
-            # Get the target entity for mutation
-            target_entity = flow_ctx.get_entity(action.mutate.entity_type)
-            if target_entity:
-                target_entity.update_state(action.mutate.updates)
+            # Mutate the attached entity's state
+            try:
+                flow_ctx.mutate_selected_entity(
+                    action.mutate.entity_type, action.mutate.updates
+                )
+            except ValueError:
+                # Entity not attached - this is OK, mutation is ignored
+                pass
 
         # Send to outputs
         for output in self.outputs:
@@ -281,13 +247,11 @@ class Simulation:
             if field_name in event_data and event_data[field_name] is not None:
                 continue
 
-            # Look for an entity that has this field as its primary key
-            for entity_type, entity in flow_ctx.entities_by_type.items():
-                if entity.primary_key == field_name:
-                    pk_value = entity.get_primary_key()
-                    if pk_value is not None:
-                        event_data[field_name] = pk_value
-                        break
+            # Look for a selected entity that has this field as its primary key
+            for entity_type, entity_id in flow_ctx.selected_entities.items():
+                if entity_type.primary_key == field_name:
+                    event_data[field_name] = entity_id
+                    break
 
     def _populate_event_metadata(
         self, event_data: Dict[str, Any], flow_ctx: FlowContext
@@ -315,10 +279,11 @@ class Simulation:
 
     def _process_set_state(self, action: SetState, flow_ctx: FlowContext):
         """Process SetState action."""
-        if flow_ctx.selected_entity and isinstance(
-            flow_ctx.selected_entity, action.entity_type
-        ):
-            flow_ctx.selected_entity.update_state(action.updates)
+        try:
+            flow_ctx.mutate_selected_entity(action.entity_type, action.updates)
+        except ValueError:
+            # Entity not attached - this is OK, mutation is ignored
+            pass
 
     def run(self):
         """Run the simulation using the new time-step based approach."""
