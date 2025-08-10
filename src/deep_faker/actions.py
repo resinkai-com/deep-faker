@@ -1,7 +1,7 @@
 """Action classes for declarative flow definitions."""
 
 from datetime import datetime, timedelta
-from typing import List, Optional, Type
+from typing import Dict, List, Optional, Type
 
 from .base import BaseEvent, Entity
 
@@ -19,14 +19,28 @@ class Context:
         self.current_time = current_time
         self.selected_entity = selected_entity
         self.current_event_data = {}
-        self.created_entity = None  # Track newly created entity
+        # Track entities by type - allows multiple entities per flow
+        self.entities_by_type: Dict[Type[Entity], Entity] = {}
+
+        # If we have a selected entity, add it to the entities_by_type
+        if selected_entity:
+            self.entities_by_type[type(selected_entity)] = selected_entity
+
+    def add_entity(self, entity_type: Type[Entity], entity: Entity):
+        """Add an entity to the context for this flow."""
+        self.entities_by_type[entity_type] = entity
 
     def get_entity(self, entity_type: Type[Entity]) -> Optional[Entity]:
-        """Get the selected entity or find one from context."""
-        if self.selected_entity and isinstance(self.selected_entity, entity_type):
+        """Get an entity of the specified type from the context."""
+        return self.entities_by_type.get(entity_type)
+
+    def get_primary_entity(self) -> Optional[Entity]:
+        """Get the primary entity (selected or first created)."""
+        if self.selected_entity:
             return self.selected_entity
-        if self.created_entity and isinstance(self.created_entity, entity_type):
-            return self.created_entity
+        # Return the first entity if any
+        if self.entities_by_type:
+            return next(iter(self.entities_by_type.values()))
         return None
 
 

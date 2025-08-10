@@ -58,6 +58,14 @@ class Purchase(BaseEvent):
     purchased_at: datetime = Field(faker="date_time")
 
 
+class OrderShipped(BaseEvent):
+    order_id: str = Field(primary_key=True, faker="uuid4")
+    user_id: str  # Should be populated from User entity
+    product_id: str  # Should be populated from Product entity if available
+    shipped_at: datetime = Field(faker="date_time")
+    tracking_number: str = Field(faker="uuid4")
+
+
 # Entities
 class User(Entity):
     source_event = UserRegistered
@@ -165,6 +173,124 @@ def test_ecommerce_simulation():
     print(f"Generated {len(output_events)} events of types: {event_types}")
 
 
+def test_multi_entity_ecommerce_flow():
+    """Test e-commerce flow that works with both User and Product entities."""
+    # Create simulation
+    sim = Simulation(
+        duration="30s",
+        start_time="now",
+        random_seed=42,
+        initial_entities={User: 5, Product: 3},
+    )
+
+    # Define a flow that interacts with both users and products
+    @sim.flow(
+        initiation_weight=5.0,
+        filter=Select(User, where=[("is_logged_in", "is", False)]),
+    )
+    def user_product_interaction(ctx: Context):
+        """User logs in, views products, and completes purchase with shipping."""
+        # User logs in
+        yield NewEvent(
+            ctx, UserLoggedIn, mutate=SetState(User, [("is_logged_in", "is", True)])
+        )
+
+        # Get a product from entity manager and add to context
+        products = sim.entity_manager.get_entities(Product)
+        if products:
+            selected_product = products[0]  # Select first product
+            ctx.add_entity(Product, selected_product)
+
+        yield AddDecay(ctx, rate=0.2, seconds=5)
+
+        # View the product
+        yield NewEvent(ctx, ProductViewed)
+
+        yield AddDecay(ctx, rate=0.3, seconds=10)
+
+        # Purchase the product (both user and product entities are affected)
+        yield NewEvent(
+            ctx,
+            Purchase,
+            quantity=1,
+            total_amount=49.99,
+            mutate=SetState(User, [("total_purchases", "add", 1)]),
+        )
+
+        yield AddDecay(ctx, rate=0.4, seconds=15)
+
+        # Ship the order (should have both user_id and product_id populated)
+        yield NewEvent(ctx, OrderShipped)
+
+    # Capture output
+    output_events = []
+
+    class TestOutput:
+        def send_event(self, event):
+            output_events.append(event)
+
+        def close(self):
+            pass
+
+    sim.add_output(TestOutput())
+
+    # Run simulation
+    sim.run()
+
+    # Verify results
+    assert len(output_events) > 0, "Should generate events"
+
+    # Check event types
+    event_types = {type(event).__name__ for event in output_events}
+
+    # Look for events that should have multiple entity IDs populated
+    login_events = [e for e in output_events if type(e).__name__ == "UserLoggedIn"]
+    purchase_events = [e for e in output_events if type(e).__name__ == "Purchase"]
+    shipping_events = [e for e in output_events if type(e).__name__ == "OrderShipped"]
+
+    # Verify that purchase events have proper user_id and product_id
+    if purchase_events:
+        purchase_event = purchase_events[0]
+        assert hasattr(purchase_event, "user_id"), "Purchase should have user_id"
+        assert hasattr(purchase_event, "product_id"), "Purchase should have product_id"
+        assert (
+            purchase_event.user_id is not None
+        ), "Purchase user_id should be populated"
+        assert (
+            purchase_event.product_id is not None
+        ), "Purchase product_id should be populated"
+
+    # Verify that shipping events have both IDs populated
+    if shipping_events:
+        shipping_event = shipping_events[0]
+        assert hasattr(shipping_event, "user_id"), "Shipping should have user_id"
+        assert hasattr(shipping_event, "product_id"), "Shipping should have product_id"
+        assert (
+            shipping_event.user_id is not None
+        ), "Shipping user_id should be populated"
+        assert (
+            shipping_event.product_id is not None
+        ), "Shipping product_id should be populated"
+
+    print(
+        f"Multi-entity flow generated {len(output_events)} events of types: {event_types}"
+    )
+
+    # Verify that user states were updated
+    users = sim.entity_manager.get_entities(User)
+    logged_in_users = [u for u in users if u.is_logged_in]
+    users_with_purchases = [u for u in users if u.total_purchases > 0]
+
+    print(
+        f"Logged in users: {len(logged_in_users)}, Users with purchases: {len(users_with_purchases)}"
+    )
+
+    # At least some users should have been affected
+    assert (
+        len(logged_in_users) > 0 or len(users_with_purchases) > 0
+    ), "Some users should have been affected by the simulation"
+
+
 def test_entity_state_management():
     """Test that entity states are properly managed."""
     # Create a user entity
@@ -212,6 +338,7 @@ def test_product_entity():
 
 if __name__ == "__main__":
     test_ecommerce_simulation()
+    test_multi_entity_ecommerce_flow()
     test_entity_state_management()
     test_product_entity()
     print("All E-commerce tests passed!")

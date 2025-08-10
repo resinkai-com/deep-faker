@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-deep-faker = "deep_faker:main"
+deepfaker = "deep_faker:main"
 
 [build-system]
 requires = ["hatchling"]

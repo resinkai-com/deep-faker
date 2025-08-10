@@ -1,7 +1,6 @@
 """Core simulation engine and management classes."""
 
 import random
-import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
@@ -208,16 +207,8 @@ class Simulation:
         # Generate event data
         event_data = self._generate_event_data(action.event_schema)
 
-        # Use the created entity from context if available and no selected entity
-        current_entity = ctx.selected_entity or ctx.created_entity
-
-        # If we have an entity, use its primary key for matching field names
-        if current_entity:
-            pk_field = current_entity.primary_key
-            pk_value = current_entity.get_primary_key()
-            # Set the primary key value if the event has that field
-            if pk_field in action.event_schema.model_fields:
-                event_data[pk_field] = pk_value
+        # Populate primary key fields from entities in context
+        self._populate_primary_keys_from_context(event_data, action.event_schema, ctx)
 
         # Apply field overrides
         event_data.update(action.field_overrides)
@@ -230,16 +221,36 @@ class Simulation:
             entity = action.save_entity(**event_data)
             self.entity_manager.add_entity(action.save_entity, entity)
             # Track the created entity in context for subsequent actions
-            ctx.created_entity = entity
-            current_entity = entity
+            ctx.add_entity(action.save_entity, entity)
 
         # Apply mutations
-        if action.mutate and current_entity:
-            current_entity.update_state(action.mutate.updates)
+        if action.mutate:
+            # Get the target entity for mutation
+            target_entity = ctx.get_entity(action.mutate.entity_type)
+            if target_entity:
+                target_entity.update_state(action.mutate.updates)
 
         # Send to outputs
         for output in self.outputs:
             output.send_event(event)
+
+    def _populate_primary_keys_from_context(
+        self, event_data: Dict[str, Any], event_schema: Type[BaseEvent], ctx: Context
+    ):
+        """Populate primary key fields in event data from entities in context."""
+        # Check each field in the event schema
+        for field_name in event_schema.model_fields.keys():
+            # Skip if field already has data
+            if field_name in event_data and event_data[field_name] is not None:
+                continue
+
+            # Look for an entity that has this field as its primary key
+            for entity_type, entity in ctx.entities_by_type.items():
+                if entity.primary_key == field_name:
+                    pk_value = entity.get_primary_key()
+                    if pk_value is not None:
+                        event_data[field_name] = pk_value
+                        break
 
     def _process_add_decay(self, action: AddDecay, ctx: Context) -> bool:
         """Process AddDecay action. Returns True if flow should terminate."""

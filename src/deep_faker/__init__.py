@@ -26,4 +26,7 @@ __all__ = [
 
 
 def main() -> None:
-    print("Hello from deep-faker!")
+    """Entry point for the CLI."""
+    from .cli import main as cli_main
+
+    cli_main()
