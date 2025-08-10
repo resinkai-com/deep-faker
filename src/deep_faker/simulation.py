@@ -1,6 +1,7 @@
 """Core simulation engine and management classes."""
 
 import random
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
@@ -149,7 +150,7 @@ class Simulation:
 
         # Get field annotations
         for field_name, field_info in event_schema.model_fields.items():
-            fake_value = generate_fake_data(field_info, self.faker)
+            fake_value = generate_fake_data(field_info, self.faker, self.current_time)
             if fake_value is not None:
                 data[field_name] = fake_value
 
@@ -188,7 +189,9 @@ class Simulation:
             if matching_entities:
                 selected_entity = random.choice(matching_entities)
 
-        ctx = Context(self, self.current_time, selected_entity)
+        # Create a unique session ID for this flow execution
+        session_id = str(uuid.uuid4())
+        ctx = Context(self, self.current_time, selected_entity, session_id)
         return ctx
 
     def _process_action(self, action, ctx: Context):
@@ -212,6 +215,9 @@ class Simulation:
 
         # Apply field overrides
         event_data.update(action.field_overrides)
+
+        # Populate standard event metadata fields
+        self._populate_event_metadata(event_data, ctx)
 
         # Create event instance
         event = action.event_schema(**event_data)
@@ -251,6 +257,20 @@ class Simulation:
                     if pk_value is not None:
                         event_data[field_name] = pk_value
                         break
+
+    def _populate_event_metadata(self, event_data: Dict[str, Any], ctx: Context):
+        """Populate standard event metadata fields."""
+        import uuid
+
+        # Generate unique event ID
+        event_data["_event_id"] = str(uuid.uuid4())
+
+        # Set event timestamp in milliseconds
+        timestamp_ms = int(self.current_time.timestamp() * 1000)
+        event_data["_event_ts"] = timestamp_ms
+
+        # Set session ID from context
+        event_data["_session_id"] = ctx.session_id
 
     def _process_add_decay(self, action: AddDecay, ctx: Context) -> bool:
         """Process AddDecay action. Returns True if flow should terminate."""

@@ -51,6 +51,11 @@ class BaseEvent(pydantic.BaseModel):
         arbitrary_types_allowed=True, use_enum_values=True
     )
 
+    # Standard event metadata fields
+    event_id_: str = Field(faker="uuid4")  # Unique ID for each event
+    event_ts_: int = Field(default=0)  # Event timestamp in milliseconds (set by simulation)
+    session_id_: str = Field(default="")  # Session ID for the flow (set by simulation)
+
 
 class StateField:
     """Descriptor for a managed state attribute on an Entity."""
@@ -126,7 +131,7 @@ class Entity(metaclass=EntityMeta):
 
 
 def generate_fake_data(
-    field_info: pydantic.fields.FieldInfo, faker_instance: Faker
+    field_info: pydantic.fields.FieldInfo, faker_instance: Faker, current_time: Optional[datetime] = None
 ) -> Any:
     """Generate fake data based on field configuration."""
     # Extract faker metadata from json_schema_extra
@@ -142,6 +147,8 @@ def generate_fake_data(
 
     if faker_type == "uuid4":
         return str(uuid.uuid4())
+    elif faker_type == "now":
+        return current_time if current_time is not None else datetime.now()
     elif faker_type == "name":
         return faker_instance.name()
     elif faker_type == "email":

@@ -1,5 +1,6 @@
 """Action classes for declarative flow definitions."""
 
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Type
 
@@ -14,6 +15,7 @@ class Context:
         simulation,
         current_time: datetime,
         selected_entity: Optional[Entity] = None,
+        session_id: Optional[str] = None,
     ):
         self.simulation = simulation
         self.current_time = current_time
@@ -21,6 +23,8 @@ class Context:
         self.current_event_data = {}
         # Track entities by type - allows multiple entities per flow
         self.entities_by_type: Dict[Type[Entity], Entity] = {}
+        # Session ID for this flow execution
+        self.session_id = session_id or str(uuid.uuid4())
 
         # If we have a selected entity, add it to the entities_by_type
         if selected_entity:

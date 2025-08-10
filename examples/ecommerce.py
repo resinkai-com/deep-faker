@@ -22,12 +22,12 @@ class UserRegistered(BaseEvent):
     user_id: str = Field(primary_key=True, faker="uuid4")
     full_name: str = Field(faker="name")
     email: str = Field(faker="email")
-    registered_at: datetime = Field(faker="date_time_this_decade")
+    registered_at: datetime = Field(faker="now")
 
 
 class UserLoggedIn(BaseEvent):
     user_id: str
-    login_time: datetime = Field(faker="date_time")
+    login_time: datetime = Field(faker="now")
     session_id: str = Field(faker="uuid4")
 
 
@@ -44,7 +44,7 @@ class ProductCreated(BaseEvent):
 class ProductViewed(BaseEvent):
     user_id: str
     product_id: str
-    viewed_at: datetime = Field(faker="date_time")
+    viewed_at: datetime = Field(faker="now")
     view_duration: int = Field(faker="random_int", min=5, max=300)  # seconds
 
 
@@ -52,7 +52,7 @@ class AddToCart(BaseEvent):
     user_id: str
     product_id: str
     quantity: int = Field(faker="random_int", min=1, max=3)
-    added_at: datetime = Field(faker="date_time")
+    added_at: datetime = Field(faker="now")
 
 
 class Purchase(BaseEvent):
@@ -61,7 +61,7 @@ class Purchase(BaseEvent):
     quantity: int
     unit_price: float
     total_amount: float
-    purchased_at: datetime = Field(faker="date_time")
+    purchased_at: datetime = Field(faker="now")
     payment_method: str = Field(
         faker="random_element", elements=["credit_card", "paypal", "apple_pay"]
     )
@@ -72,7 +72,7 @@ class ProductReview(BaseEvent):
     product_id: str
     rating: int = Field(faker="random_int", min=1, max=5)
     review_text: str = Field(faker="text", max_nb_chars=200)
-    reviewed_at: datetime = Field(faker="date_time")
+    reviewed_at: datetime = Field(faker="now")
 
 
 # Entities
