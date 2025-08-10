@@ -261,14 +261,14 @@ class Simulation:
         import uuid
 
         # Generate unique event ID
-        event_data["event_id_"] = str(uuid.uuid4())
+        event_data["sys__eid"] = str(uuid.uuid4())
 
         # Set event timestamp in milliseconds using flow clock
         timestamp_ms = int(flow_ctx.flow_clock.timestamp() * 1000)
-        event_data["event_ts_"] = timestamp_ms
+        event_data["sys__ets"] = timestamp_ms
 
         # Set session ID from context
-        event_data["session_id_"] = flow_ctx.session_id
+        event_data["sys__sid"] = flow_ctx.session_id
 
     def _process_add_decay(self, action: AddDecay, flow_ctx: FlowContext) -> bool:
         """Process AddDecay action. Returns True if flow should terminate."""

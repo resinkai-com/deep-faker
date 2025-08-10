@@ -8,6 +8,8 @@ from deep_faker import (
     BaseEvent,
     Entity,
     Field,
+    FileOutput,
+    KafkaOutput,
     NewEvent,
     Select,
     SetState,
@@ -534,11 +536,46 @@ def order_management_flow(ctx: FlowContext):
 
 # Configure outputs
 sim.add_output(StdOutOutput())
+sim.add_output(FileOutput("output/ecommerce_events.jsonl"))  # File output
+
+# Kafka output with topic mapping for different event types
+kafka_topic_mapping = {
+    AccountCreated: "user-events",
+    Search: "search-events",
+    ProductClicked: "product-events",
+    ProductDetailsViewed: "product-events",
+    ProductAdded: "cart-events",
+    CheckoutStarted: "checkout-events",
+    ShippingInfoAdded: "checkout-events",
+    PaymentInfoAdded: "checkout-events",
+    OrderCompleted: "order-events",
+    OrderEdited: "order-events",
+    OrderCancelled: "order-events",
+    ErrorTriggered: "error-events",
+    ProductListed: "product-events",
+}
+
+try:
+    sim.add_output(
+        KafkaOutput(
+            topic_mapping=kafka_topic_mapping, bootstrap_servers="localhost:9092"
+        )
+    )
+    print("✓ Kafka output configured (localhost:9092)")
+except ImportError:
+    print("⚠ Kafka output skipped (kafka-python not installed)")
+except Exception as e:
+    print(f"⚠ Kafka output skipped ({str(e)})")
 
 # The simulation will be run by the CLI
 if __name__ == "__main__":
     print("Realistic E-commerce Simulation")
     print("==============================")
     print("Based on standard e-commerce events taxonomy")
-    print()
+    print("")
+    print("Outputs configured:")
+    print("  • Console (stdout)")
+    print("  • File: ecommerce_events.jsonl")
+    print("  • Kafka: localhost:9092 (multiple topics)")
+    print("")
     sim.run()

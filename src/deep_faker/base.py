@@ -52,11 +52,11 @@ class BaseEvent(pydantic.BaseModel):
     )
 
     # Standard event metadata fields
-    event_id_: str = Field(faker="uuid4")  # Unique ID for each event
-    event_ts_: int = Field(
+    sys__eid: str = Field(faker="uuid4")  # Unique ID for each event
+    sys__ets: int = Field(
         default=0
     )  # Event timestamp in milliseconds (set by simulation)
-    session_id_: str = Field(default="")  # Session ID for the flow (set by simulation)
+    sys__sid: str = Field(default="")  # Session ID for the flow (set by simulation)
 
 
 class StateField:
