@@ -15,6 +15,7 @@ from .actions import (
     SetState,
 )
 from .base import BaseEvent, Entity, generate_fake_data
+from .logging import get_logger
 
 
 class FlowDefinition:
@@ -54,6 +55,7 @@ class Simulation:
         self.outputs = []
         self.global_context = GlobalContext(self.start_time)
         self.faker = Faker()
+        self.logger = get_logger(__name__)
 
         if random_seed is not None:
             random.seed(random_seed)
@@ -311,7 +313,7 @@ class Simulation:
 
     def run(self):
         """Run the simulation using the new time-step based approach."""
-        print(
+        self.logger.info(
             f"Starting simulation for {self.duration} with time_step={self.time_step} and n_flows={self.n_flows}"
         )
 
@@ -394,7 +396,7 @@ class Simulation:
             # Advance to next time step
             ti = tj
 
-        print(f"Simulation completed at {ti}")
+        self.logger.info(f"Simulation completed at {ti}")
 
         # Clean up outputs
         for output in self.outputs:

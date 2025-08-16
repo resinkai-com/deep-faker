@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
 from .base import BaseEvent
+from .logging import get_logger
 
 try:
     from kafka import KafkaProducer
@@ -138,6 +139,7 @@ class MySQLOutput(BaseOutput):
         self.table_mapping = table_mapping or {}
         self.connection = None
         self.cursor = None
+        self.logger = get_logger(__name__)
         self._connect()
 
     def _connect(self):
@@ -146,7 +148,7 @@ class MySQLOutput(BaseOutput):
             self.connection = mysql.connector.connect(**self.connection_config)
             self.cursor = self.connection.cursor()
         except mysql.connector.Error as e:
-            print(f"Error connecting to MySQL: {e}")
+            self.logger.error(f"Error connecting to MySQL: {e}")
 
     def _get_table_name(self, event_type: Type[BaseEvent]) -> str:
         """Get table name for event type."""
@@ -180,7 +182,7 @@ class MySQLOutput(BaseOutput):
             self.cursor.execute(create_sql)
             self.connection.commit()
         except mysql.connector.Error as e:
-            print(f"Error creating table {table_name}: {e}")
+            self.logger.error(f"Error creating table {table_name}: {e}")
 
     def send_event(self, event: BaseEvent):
         """Send event to MySQL table."""
@@ -206,7 +208,7 @@ class MySQLOutput(BaseOutput):
             self.cursor.execute(insert_sql, values)
             self.connection.commit()
         except mysql.connector.Error as e:
-            print(f"Error inserting into {table_name}: {e}")
+            self.logger.error(f"Error inserting into {table_name}: {e}")
 
     def close(self):
         """Close MySQL connection."""

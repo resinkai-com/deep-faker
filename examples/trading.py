@@ -15,6 +15,7 @@ from deep_faker import (
     StateField,
     StdOutOutput,
 )
+from deep_faker.logging import get_logger
 
 
 # Event Schemas
@@ -242,6 +243,7 @@ sim.add_output(StdOutOutput())
 
 # The simulation will be run by the CLI
 if __name__ == "__main__":
-    print("Trading Platform Simulation")
-    print("==========================")
+    logger = get_logger(__name__)
+    logger.info("Trading Platform Simulation")
+    logger.info("==========================")
     sim.run()

@@ -13,6 +13,8 @@ from deep_faker import (
     StateField,
     StdOutOutput,
 )
+from deep_faker.logging import get_logger
+from deep_faker.outputs import FileOutput
 
 
 # 1. Define Event Schemas
@@ -108,8 +110,9 @@ def user_purchase_flow(ctx: FlowContext):
     purchase_quantity = 1
     total_price = product.price * purchase_quantity
 
-    print(
-        f"INFO: Flow started for User '{user.get_primary_key()}' purchasing Product '{product.get_primary_key()}'"
+    logger = get_logger(__name__)
+    logger.info(
+        f"Flow started for User '{user.get_primary_key()}' purchasing Product '{product.get_primary_key()}'"
     )
 
     # A short delay to simulate browsing before purchase
@@ -132,7 +135,9 @@ def user_purchase_flow(ctx: FlowContext):
 
 
 # 5. Configure Outputs
-sim.add_output(StdOutOutput())  # Log events to the console
+sim.add_output(StdOutOutput())
+sim.add_output(FileOutput(f"output/{__name__}.jsonl"))
+# Log events to the console
 
 # 6. Run Simulation
 if __name__ == "__main__":
