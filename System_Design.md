@@ -1,309 +1,355 @@
-# System Design: Python-Native Event Mocking (Declarative)
+# Deep Faker: Python-Native Event Simulation User Guide
 
-## 1. System Architecture
+Deep Faker is a declarative event simulation library that allows you to create realistic, stateful event streams using Python. This guide demonstrates how to build complex simulations through simple, declarative flows.
 
-The architecture is centered around a Generator Engine that interprets declarative actions yielded by user-defined flows to manipulate a global state of entities.
+## Quick Start: Complete Example
 
-- Configuration File (events_main.py): The user's script defining all schemas, entities, flows, and outputs.
-- Simulation Object: The central controller. It's configured with simulation parameters, initial entity states, and a registry of flows and outputs. It orchestrates the entire run.
-- Generator Engine: The heart of the system. It's a loop that:
-  - Selects a flow to run based on its weight and entry conditions (filter).
-  - Executes the flow, which yields a stream of Action objects.
-  - Processes each Action (e.g., creating an event, updating entity state, advancing the clock).
-  - Dispatches the generated events to all registered Outputs.
-- Pydantic Schemas & Custom Field: Type-safe event models with built-in data generation logic.
-- Entities & State Fields: Classes that explicitly define the stateful objects in the simulation (User, Product) and their managed attributes.
-- Flows: Python generators that yield a sequence of Actions, defining a potential path through the state machine.
-- Actions: Simple, declarative objects that represent a single operation to be performed by the engine (e.g., NewEvent, AddDecay, SetState).
-- Outputs: Classes that send generated event data to external systems.
-
-## 2. Core Component API Design
-
-### 2.1. Pydantic Schemas & Generator-Aware Field
-
-Event schemas are Pydantic models. We introduce a custom Field that accepts generator hints directly, simplifying the model definitions.
+Here's a complete e-commerce simulation that demonstrates all core concepts:
 
 ```python
-import uuid
 from datetime import datetime
-import pydantic
-
-# The library would provide these base classes and fields
-class BaseEvent(pydantic.BaseModel):
-    # Common logic, e.g., event timestamping, can go here
-    pass
-
-class Field(pydantic.Field):
-    def __init__(self, *, faker: str = None, primary_key: bool = False, **kwargs):
-        self.faker = faker
-        self.primary_key = primary_key
-        super().__init__(**kwargs)
-
-# User-defined schemas
-class UserRegistered(BaseEvent):
-    user_id: uuid.UUID = Field(primary_key=True, faker="uuid4")
-    full_name: str = Field(faker="name")
-    email: str = Field(faker="email")
-    registered_at: datetime = Field(faker="date_time_this_decade")
-
-class ProductCreated(BaseEvent):
-    product_id: str = Field(primary_key=True, faker="ean")
-    name: str = Field(faker="ecommerce.product_name")
-    status: str = Field(faker="random_element", elements=("available", "discontinued"))
-```
-
-### 2.2. Entity State Management
-
-Entities are explicit classes that define the stateful objects of the simulation. StateField is a descriptor used to define attributes that are managed by the simulation engine.
-
-```python
-# The library would provide these base classes
-class Entity:
-    """Base class for all stateful entities."""
-    # Metaclass logic handles registration and linking to source events
-    pass
-
-class StateField:
-    """Descriptor for a managed state attribute on an Entity."""
-    def __init__(self, default=None, from_field: str = None, type_=None):
-        self.default = default
-        self.from_field = from_field # Pulls initial value from a field in the source event
-        self.type = type_
-
-# User-defined entities
-class User(Entity):
-    source_event = UserRegistered  # This event creates a User
-    primary_key = "user_id"        # Links the entity to the event payload
-
-    # Managed state attributes
-    is_logged_in: bool = StateField(default=False, type_=bool)
-    last_login: datetime | None = StateField(default=None, type_=datetime)
-    total_purchases: int = StateField(default=0, type_=int)
-
-class Product(Entity):
-    source_event = ProductCreated
-    primary_key = "product_id"
-
-    # The initial value for 'current_status' is copied from the 'status'
-    # field of the ProductCreated event that created this entity.
-    current_status: str = StateField(from_field="status", type_=str)
-    inventory: int = StateField(default=100, type_=int)
-```
-
-### 2.3. Declarative Flows & Actions
-
-Flows are standard Python functions that act as generators, yielding Action objects. This creates a declarative sequence of instructions for the engine to execute.
-
-```python
-# The library provides Action classes
-class NewEvent:
-    def __init__(self, ctx, event_schema, save_entity=None, mutate=None): ...
-
-class AddDecay:
-    def __init__(self, ctx, rate: float, **kwargs_for_time_delta): ...
-
-class Select:
-    def __init__(self, entity_type, where: list = None): ...
-
-class SetState:
-    def __init__(self, entity_type, updates: list[tuple]): ...
-
-# --- User-defined flows ---
-# The Simulation object is the central registry
-sim = Simulation(
-    duration="1h",
-    initial_entities={User: 100, Product: 50},
-    random_seed=42
+from deep_faker import (
+    BaseEvent, Entity, Field, StateField, Simulation,
+    NewEvent, AddDecay, Select, SetState, FlowContext,
+    StdOutOutput, FileOutput
 )
 
-@sim.flow(initiation_weight=5.0)
-def new_user_onboarding(ctx: deep_faker.Context):
-    """A new user registers, logs in, and might browse."""
-    # Action 1: Create a UserRegistered event. The engine sees `save_entity=User`
-    # and creates a new User entity in its state manager.
-    yield NewEvent(ctx, UserRegistered, save_entity=User)
+# 1. Define Event Schemas
+class AccountCreated(BaseEvent):
+    user_id: str = Field(primary_key=True, faker="uuid4")
+    email: str = Field(faker="email")
+    full_name: str = Field(faker="name")
 
-    # Action 2: Advance simulation time by 1 to 10 minutes.
-    # There's a 20% chance the flow stops here.
-    yield AddDecay(ctx, rate=0.2, minutes=faker.random_int(1, 10))
+class ProductAdded(BaseEvent):
+    user_id: str
+    product_id: str
+    cart_id: str
+    quantity: int = Field(faker="random_int", min=1, max=3)
 
-    # Action 3: Create a UserLoggedIn event. The `mutate` instruction tells
-    # the engine to find the User associated with this context and update its state.
+class OrderCompleted(BaseEvent):
+    user_id: str
+    order_id: str
+    total_amount: float
+
+# 2. Define Entities with State
+class User(Entity):
+    source_event = AccountCreated
+    primary_key = "user_id"
+
+    is_logged_in: bool = StateField(default=False, type_=bool)
+    cart_id: str = StateField(default=None, type_=str)
+    total_orders: int = StateField(default=0, type_=int)
+
+class Product(Entity):
+    source_event = None  # Will be created during initialization
+    primary_key = "product_id"
+
+    name: str = StateField(type_=str)
+    price: float = StateField(type_=float)
+    inventory: int = StateField(default=100, type_=int)
+
+# 3. Create Simulation
+sim = Simulation(
+    duration="2m",
+    start_time="now",
+    n_flows=3,
+    initial_entities={User: 10, Product: 5}
+)
+
+# 4. Define Flows (Business Logic)
+@sim.flow(initiation_weight=3.0)
+def new_user_registration(ctx: FlowContext):
+    """New users register and may browse products."""
+    yield NewEvent(ctx, AccountCreated, save_entity=User)
+    yield AddDecay(ctx, rate=0.2, seconds=30)  # 20% drop-off
+
+    # User logs in
     yield NewEvent(
-        ctx,
-        UserLoggedIn,
+        ctx, ProductAdded,
         mutate=SetState(User, [("is_logged_in", "is", True)])
     )
 
 @sim.flow(
-    initiation_weight=10.0,
-    # This flow can only start if the engine can find a User
-    # that is currently logged in.
+    initiation_weight=5.0,
     filter=Select(User, where=[("is_logged_in", "is", True)])
 )
-def returning_user_session(ctx: deep_faker.Context):
-    """A returning, logged-in user browses products."""
-    yield NewEvent(ctx, HomePageView)
-    yield AddDecay(ctx, rate=0.5, seconds=30)
-    yield NewEvent(ctx, ProductPageView)
-```
+def shopping_flow(ctx: FlowContext):
+    """Logged-in users add products and complete orders."""
+    user = ctx.get_entity(User)
+    cart_id = f"cart_{ctx.session_id[:8]}"
 
-### 2.4. Complete Example: events_main.py
-
-This file shows how all the declarative components work together.
-
-```python
-# examples/mysas/events_main.py
-
-import uuid
-from datetime import datetime
-from faker import Faker
-
-# Assume 'deep_faker' is the name of our library and it provides these components
-from deep_faker import (
-    Simulation, Context, BaseEvent, Entity, Field, StateField,
-    NewEvent, AddDecay, Select, SetState
-)
-from deep_faker.outputs import KafkaOutput, StdOutOutput
-
-# --- 1. Initialize Faker & Simulation ---
-faker = Faker()
-sim = Simulation(
-    duration="30m",
-    start_time="now",
-    random_seed=101,
-    initial_entities={
-        "User": 500,  # Initialize with 500 existing users
-        "Product": 100 # and 100 products
-    }
-)
-
-# --- 2. Define Event Schemas ---
-class UserRegistered(BaseEvent):
-    user_id: uuid.UUID = Field(primary_key=True, faker="uuid4")
-    full_name: str = Field(faker="name")
-
-class UserLoggedIn(BaseEvent):
-    user_id: uuid.UUID
-    login_time: datetime = Field(faker="date_time")
-
-class ProductCreated(BaseEvent):
-    product_id: str = Field(primary_key=True, faker="ean")
-    name: str = Field(faker="ecommerce.product_name")
-    status: str = Field(faker="random_element", elements=["available", "coming_soon"])
-
-class PageViewed(BaseEvent):
-    user_id: uuid.UUID
-    page: str
-
-# --- 3. Define Entities and their State ---
-class User(Entity):
-    source_event = UserRegistered
-    primary_key = "user_id"
-    is_logged_in: bool = StateField(default=False, type_=bool)
-
-class Product(Entity):
-    source_event = ProductCreated
-    primary_key = "product_id"
-    current_status: str = StateField(from_field="status", type_=str)
-
-# --- 4. Define Flows using Declarative Actions ---
-@sim.flow(initiation_weight=2.0)
-def new_user_flow(ctx: Context):
-    """A new user is created and logs in."""
-    yield NewEvent(ctx, UserRegistered, save_entity=User)
-    yield AddDecay(ctx, seconds=15, rate=0.1) # 10% chance to drop off
-    yield NewEvent(ctx, UserLoggedIn, mutate=SetState(User, [("is_logged_in", "is", True)]))
-
-@sim.flow(
-    initiation_weight=8.0,
-    filter=Select(User, where=[("is_logged_in", "is", False)])
-)
-def returning_user_login_flow(ctx: Context):
-    """An existing, logged-out user logs in and views the homepage."""
-    yield NewEvent(ctx, UserLoggedIn, mutate=SetState(User, [("is_logged_in", "is", True)]))
-    yield AddDecay(ctx, seconds=5, rate=0.05)
-    yield NewEvent(ctx, PageViewed, page="/home")
-
-# --- 5. Configure Outputs ---
-sim.add_output(
-    KafkaOutput(
-        topic_mapping={
-            UserRegistered: "user_profiles",
-            ProductCreated: "product_catalog",
-            UserLoggedIn: "user_activity",
-            PageViewed: "user_activity",
-        }
+    # Add product to cart
+    yield NewEvent(
+        ctx, ProductAdded,
+        cart_id=cart_id,
+        product_id="PROD_001",
+        mutate=SetState(User, [("cart_id", "is", cart_id)])
     )
-)
-sim.add_output(StdOutOutput())
 
-# --- 6. Run the Simulation ---
+    yield AddDecay(ctx, rate=0.4, seconds=60)  # 40% abandon cart
+
+    # Complete order
+    yield NewEvent(
+        ctx, OrderCompleted,
+        order_id=f"order_{ctx.session_id[:8]}",
+        total_amount=99.99,
+        mutate=SetState(User, [("total_orders", "add", 1)])
+    )
+
+# 5. Configure Outputs
+sim.add_output(StdOutOutput())
+sim.add_output(FileOutput("simulation_events.jsonl"))
+
+# 6. Run Simulation
 if __name__ == "__main__":
     sim.run()
 ```
 
-## Implementation Requirements
+This example demonstrates:
 
-1. The outputs should support, 'file', 'stdout', 'kafka' and 'mysql'
-2. Write two end to end tests that shows the events can be correctly generated based on the configs.
-   1. One example for E-commerce focused event simulation
-   2. One example for Trading platform event simulation
-3. Both end to end tests should be runnable with pytest and both should pass.
+- **Events**: Structured data models with fake data generation
+- **Entities**: Stateful objects that persist across flows
+- **Flows**: Business logic that generates event sequences
+- **Context**: Flow state and entity selection
+- **Outputs**: Multiple destinations for generated events
 
-## Context and state
+## Core Components
 
-1. The simulation should maintain a global state which stores
-   - Available entities, this include:
-     * Historical entities, that are created before the simulation by `initial_entities`
-     * Created entities during the simulation
-     * Entities that are taken by a running flow should be marked as Active Entities, and should be excluded from available entities.
-     * Available entities are used for initilzing flows:
-     * For example if a flow has filter `filter=Select(User, where=[("is_logged_in", "is", True)])`. It means the flow will randomly select from available entities whose `is_logged_in is True`.
-   - Clock, global clock determins the start time of each flow.
+### Events
 
-2. In addition to the global context, we also need a flow context. Flow context maintains the state of the flow, it stores
-   - session_id, all the events emitted from the flow should have the same context
-   - clock, all the time mutation inside the flow, like `AddDecay` manimulates the flow clock. 
+Events are Pydantic models that define your data schema with built-in fake data generation:
 
-## Simulation Setup 
-Let's set the simulation to accept start time, time step and number of flows. Pseudo code for flow selection should be somthing like:
-
-```
-ctx = create_global_context()
-while ti < t_end:
-    tj = ti + t_step
-    for _ in range(n_flows):
-        tf = random(ti, tj)  # randomly select a time between ti, tj
-        flow = selct_one_flow()
-        session = ctx.start_flow()
-        flow.run(ctx, session)
+```python
+class UserRegistered(BaseEvent):
+    user_id: str = Field(primary_key=True, faker="uuid4")
+    email: str = Field(faker="email")
+    registration_date: datetime = Field(faker="now")
+    account_type: str = Field(
+        faker="random_element",
+        elements=["free", "premium", "enterprise"]
+    )
 ```
 
-## Entity Management
-1. Each entity can have its own state, and that state is global. For example, if a user is logged in, it is global, it does not make sense that user is logged in one flow, but logged out in another at the same time.
-2. Entities can be attached to flows. This simplifies the API, for example `SetState(User, [("cart_items", "add", 1)])` mutates the state of the attached User entity of the flow.
-3. Let's use EntityManager in the global context and make it be able to handle entity state with versions
-   - The EntityManager should be able to track entitie state change across the simulation time range. Something like
-     (User, id:123, state:u123_state_1, valid_from:'2025-08-10 10:10:27.527910', valid_to:'2025-08-10 10:10:57.527910')
-     (User, id:123, state:u123_state_2, valid_from:'2025-08-10 10:10:57.527910', valid_to:None)
-   - The EntityManager allows querying entities at given time, like
-     * entity_manager.query(User, where=[("is_logged_in", "is", True)], time='2025-08-10 10:10:30.527910')
-   - if time parameter is not given, default to global clock current time.
-   - The EntityManager allows mutating state at given time, like:
-     * entity_manager.insert(User, where=[("user_id", "=", 123)], state=u123_state_3, time='2025-08-10 10:15:30.527910')
-     * this insert will update the previous state and set `valid_to` to the insert time.
-     * this insert will also create a new state period with `valid_from`  being the insert time and `valid_to` to None, like:
-     * > (User, id:123, state:u123_state_3, valid_from:'2025-08-10 10:15:30.527910', valid_to:None)
-4. In each flow, entity state can be mutated, this mutation should be applied to the global entity manager. For example `NewEvent(ctx, AddToCart, product_id="PRODUCT_001", mutate=SetState(User, [("cart_items", "add", 1)]))`. 
+**Key Features:**
 
+- **Type Safety**: Full Pydantic validation and typing
+- **Fake Data**: Automatic realistic data generation
+- **Primary Keys**: Mark fields that identify entities
+- **System Fields**: Automatic event ID, timestamp, session tracking
 
-## Implicit State, Implicity Mutation and Implicit Filtering
-- Entities can have customized state fields. On the other, some state are implicitly added to all events. For example `flow_name` is a state filed that tracks if the name of the flow which currently owns the entity. 
-- Also, some mutations are implicitly applied even they are not explictly expressed in any Actions. For example, `flow_name` state of attached entities will be set after entering a flow and it is removed before existing a flow. 
-- In addition to customized filters defined in the flow annotations, all flows have an implicity filter which is like `[('flow_name', 'is', 'None')]`
+### Entities
 
+Entities represent stateful objects in your simulation:
 
-Once the above implicit state, mutation and filtering are implemented, we can simplify the implementations:
-1. we don't need to maintain `active_entities` separtely in the `EntityManager`. `active_entities` are entities whose flow_name is None at the given time.
-2. we can remove functions like `mark_entity_active` or `mark_entity_available`. Entity states are set either explicitly or implicitly.
+```python
+class User(Entity):
+    source_event = UserRegistered  # Event that creates this entity
+    primary_key = "user_id"        # Links entity to event
+
+    # State fields with defaults and types
+    is_active: bool = StateField(default=True, type_=bool)
+    login_count: int = StateField(default=0, type_=int)
+    last_seen: datetime = StateField(default=None, type_=datetime)
+
+    # Copy initial value from source event
+    account_type: str = StateField(from_field="account_type", type_=str)
+```
+
+**State Management:**
+
+- **Persistence**: State persists across flows and time
+- **Versioning**: Full temporal state tracking
+- **Mutations**: Explicit state updates through SetState actions
+
+### Actions
+
+Actions are declarative instructions that flows yield to the simulation engine:
+
+| Action     | Purpose                    | Example                                           |
+| ---------- | -------------------------- | ------------------------------------------------- |
+| `NewEvent` | Generate an event          | `NewEvent(ctx, UserLogin, save_entity=User)`      |
+| `AddDecay` | Advance time with drop-off | `AddDecay(ctx, rate=0.3, minutes=5)`              |
+| `SetState` | Update entity state        | `SetState(User, [("login_count", "add", 1)])`     |
+| `Select`   | Filter entities            | `Select(User, where=[("is_active", "is", True)])` |
+
+### Flows
+
+Flows define business logic as Python generators:
+
+```python
+@sim.flow(
+    initiation_weight=8.0,  # Relative probability of starting
+    filter=Select(User, where=[("is_active", "is", True)])  # Prerequisites
+)
+def user_session_flow(ctx: FlowContext):
+    """Active users log in and browse."""
+    # Get the selected user
+    user = ctx.get_entity(User)
+
+    # Generate login event with state mutation
+    yield NewEvent(
+        ctx, UserLogin,
+        mutate=SetState(User, [("login_count", "add", 1)])
+    )
+
+    # 30% chance to drop off after 2 minutes
+    yield AddDecay(ctx, rate=0.3, minutes=2)
+
+    # Continue with browsing...
+    yield NewEvent(ctx, PageView, page="/dashboard")
+```
+
+### Simulation
+
+The simulation orchestrates everything:
+
+```python
+sim = Simulation(
+    duration="30m",          # How long to simulate
+    start_time="now",        # When to start
+    time_step="1s",          # Time resolution
+    n_flows=5,               # Concurrent flows
+    random_seed=42,          # Reproducible results
+    initial_entities={       # Pre-existing entities
+        User: 100,
+        Product: 20
+    }
+)
+```
+
+## Key Concepts
+
+### Context and State
+
+The simulation maintains two levels of context:
+
+**Global Context:**
+
+- Manages all entities and their states over time
+- Tracks which entities are available vs. active in flows
+- Provides global simulation clock
+
+**Flow Context:**
+
+- Maintains session ID for event correlation
+- Tracks selected entities for the current flow
+- Has its own clock that advances with AddDecay
+
+### Entity Management
+
+Entities are managed with full temporal tracking:
+
+```python
+# Entity states are versioned over time
+(User, id:123, state:logged_out, valid_from:'10:00:00', valid_to:'10:05:30')
+(User, id:123, state:logged_in,  valid_from:'10:05:30', valid_to:None)
+
+# Query entities at specific times
+available_users = entity_manager.query(
+    User,
+    where=[("is_active", "is", True)],
+    time='10:03:00'
+)
+```
+
+### Implicit State and Mutations
+
+The system automatically manages some state:
+
+**Implicit State Fields:**
+
+- `flow_name`: Tracks which flow currently owns an entity
+- Available entities have `flow_name = None`
+- Active entities have `flow_name = "flow_12345"`
+
+**Implicit Filtering:**
+
+- All flows automatically filter for `flow_name = None`
+- Prevents double-booking of entities
+
+**Implicit Mutations:**
+
+- Entity `flow_name` is set when entering a flow
+- Entity `flow_name` is cleared when exiting a flow
+
+### Entity Selection and Filtering
+
+Flows can specify prerequisites for starting:
+
+```python
+@sim.flow(
+    initiation_weight=5.0,
+    filter=Select(User, where=[
+        ("is_active", "is", True),
+        ("login_count", "greater_than", 5)
+    ])
+)
+def power_user_flow(ctx: FlowContext):
+    # This flow only runs if we can find an active user
+    # with more than 5 logins who isn't already in a flow
+    pass
+```
+
+## Configuration Reference
+
+### Supported Faker Types
+
+| Faker            | Parameters                                   | Example Output                           |
+| ---------------- | -------------------------------------------- | ---------------------------------------- |
+| `uuid4`          | -                                            | `"f47ac10b-58cc-4372-a567-0e02b2c3d479"` |
+| `shortuuid`      | `length=8`                                   | `"mBT5Q2Nx"`                             |
+| `name`           | -                                            | `"John Smith"`                           |
+| `email`          | -                                            | `"john@example.com"`                     |
+| `random_element` | `elements=[...]`                             | Selected from list                       |
+| `random_int`     | `min=1, max=100`                             | `42`                                     |
+| `pyfloat`        | `min_value=0, max_value=1000, positive=True` | `123.45`                                 |
+| `date_time`      | -                                            | `2025-01-15 14:30:00`                    |
+| `now`            | -                                            | Current timestamp                        |
+| `lexify`         | `text="PROD_????"`                           | `"PROD_A1B2"`                            |
+
+### State Operations
+
+| Operation    | Usage                          | Description                 |
+| ------------ | ------------------------------ | --------------------------- |
+| `"is"`       | `("status", "is", "active")`   | Set field to value          |
+| `"add"`      | `("count", "add", 1)`          | Add to numeric field        |
+| `"subtract"` | `("inventory", "subtract", 5)` | Subtract from numeric field |
+
+### Filter Conditions
+
+| Condition        | Usage                         | Description        |
+| ---------------- | ----------------------------- | ------------------ |
+| `"is"`           | `("status", "is", "active")`  | Exact match        |
+| `"is_not"`       | `("cart_id", "is_not", None)` | Not equal          |
+| `"greater_than"` | `("age", "greater_than", 18)` | Numeric comparison |
+| `"less_than"`    | `("score", "less_than", 100)` | Numeric comparison |
+
+### Output Types
+
+| Output         | Purpose         | Configuration                          |
+| -------------- | --------------- | -------------------------------------- |
+| `StdOutOutput` | Console logging | `StdOutOutput()`                       |
+| `FileOutput`   | JSON file       | `FileOutput("events.jsonl")`           |
+| `KafkaOutput`  | Apache Kafka    | `KafkaOutput(topic_mapping={...})`     |
+| `MySQLOutput`  | MySQL database  | `MySQLOutput(connection_config={...})` |
+
+## Best Practices
+
+1. **Start Simple**: Begin with basic flows and add complexity gradually
+2. **Use Realistic Weights**: Model flow probabilities based on actual user behavior
+3. **Plan State Carefully**: Design entity state fields before building flows
+4. **Test Incrementally**: Run short simulations while developing
+5. **Monitor Drop-offs**: Use AddDecay to model realistic user abandonment
+6. **Correlate Events**: Use session IDs to trace user journeys
+7. **Validate Output**: Always verify generated events match expectations
+
+## Example Use Cases
+
+- **E-commerce**: User registration, product browsing, cart abandonment, purchases
+- **SaaS Applications**: User onboarding, feature usage, subscription management
+- **IoT Systems**: Device telemetry, status updates, alert generation
+- **Financial Services**: Account creation, transactions, risk events
+- **Gaming**: Player actions, progression, in-game purchases
+- **Marketing**: Campaign interactions, lead scoring, conversion funnels
+
+Deep Faker enables you to create sophisticated, realistic event simulations with minimal code while maintaining full control over timing, state, and business logic.
