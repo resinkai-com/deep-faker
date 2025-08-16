@@ -174,17 +174,32 @@ Actions are declarative instructions that flows yield to the simulation engine:
 
 ### Flows
 
-Flows define business logic as Python generators:
+Flows define business logic as Python generators. You can select entities in two ways:
 
+**Option 1: Filter on flow initiation (legacy)**
 ```python
 @sim.flow(
-    initiation_weight=8.0,  # Relative probability of starting
-    filter=Select(User, where=[("is_active", "is", True)])  # Prerequisites
+    initiation_weight=8.0,  
+    filter=Select(User, where=[("is_active", "is", True)])
 )
+def legacy_user_session_flow(ctx: FlowContext):
+    """Flow starts only if active user available."""
+    user = ctx.get_entity(User)  # Pre-selected user
+    yield NewEvent(ctx, UserLogin, mutate=SetState(User, [("login_count", "add", 1)]))
+```
+
+**Option 2: Select entities within flow (recommended)**
+```python
+@sim.flow(initiation_weight=8.0)
 def user_session_flow(ctx: FlowContext):
     """Active users log in and browse."""
-    # Get the selected user
+    # Select entities dynamically within the flow
+    yield Select(ctx, User, where=[("is_active", "is", True)])
+    yield Select(ctx, Product, where=[("status", "is", "available")])
+    
+    # Get the selected entities
     user = ctx.get_entity(User)
+    product = ctx.get_entity(Product)
 
     # Generate login event with state mutation
     yield NewEvent(
@@ -353,3 +368,4 @@ def power_user_flow(ctx: FlowContext):
 - **Marketing**: Campaign interactions, lead scoring, conversion funnels
 
 Deep Faker enables you to create sophisticated, realistic event simulations with minimal code while maintaining full control over timing, state, and business logic.
+

@@ -2,7 +2,6 @@
 
 from .actions import (
     AddDecay,
-    Context,
     FlowContext,
     GlobalContext,
     NewEvent,
@@ -22,9 +21,8 @@ __all__ = [
     "Entity",
     "StateField",
     "EntityManager",
-    "Context",  # Legacy - will be deprecated
-    "FlowContext",  # New flow context
-    "GlobalContext",  # New global context
+    "FlowContext",
+    "GlobalContext",
     "NewEvent",
     "AddDecay",
     "Select",

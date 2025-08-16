@@ -189,6 +189,8 @@ class Simulation:
             return self._process_add_decay(action, flow_ctx)
         elif isinstance(action, SetState):
             self._process_set_state(action, flow_ctx)
+        elif isinstance(action, Select):
+            self._process_select(action, flow_ctx)
 
         return False  # Continue flow
 
@@ -222,14 +224,20 @@ class Simulation:
 
         # Apply mutations
         if action.mutate:
-            # Mutate the attached entity's state
-            try:
-                flow_ctx.mutate_selected_entity(
-                    action.mutate.entity_type, action.mutate.updates
-                )
-            except ValueError:
-                # Entity not attached - this is OK, mutation is ignored
-                pass
+            # Handle both single SetState and list of SetState objects
+            mutations = (
+                action.mutate if isinstance(action.mutate, list) else [action.mutate]
+            )
+
+            for mutation in mutations:
+                # Mutate the attached entity's state
+                try:
+                    flow_ctx.mutate_selected_entity(
+                        mutation.entity_type, mutation.updates
+                    )
+                except ValueError:
+                    # Entity not attached - this is OK, mutation is ignored
+                    pass
 
         # Send to outputs
         for output in self.outputs:
@@ -285,6 +293,21 @@ class Simulation:
         except ValueError:
             # Entity not attached - this is OK, mutation is ignored
             pass
+
+    def _process_select(self, action: Select, flow_ctx: FlowContext):
+        """Process Select action - select entities dynamically within flows."""
+        if not action.ctx:
+            # This is a filter-only Select, not an action
+            return
+
+        # Find available entities matching the criteria
+        matching_entities = self.global_context.select_entities(action)
+
+        if matching_entities:
+            # Select a random entity from matches
+            selected_entity = random.choice(matching_entities)
+            # Add to flow context
+            flow_ctx.add_entity(action.entity_type, selected_entity)
 
     def run(self):
         """Run the simulation using the new time-step based approach."""
@@ -353,12 +376,6 @@ class Simulation:
                             action, flow_info["flow_ctx"]
                         )
                         if should_terminate:
-                            flow_info["active"] = False
-                            completed_flows.append(i)
-
-                        # If flow time exceeds time step, pause it (this is simplified)
-                        if flow_info["flow_ctx"].flow_clock > tj:
-                            # In a more complex implementation, we might reschedule
                             flow_info["active"] = False
                             completed_flows.append(i)
 

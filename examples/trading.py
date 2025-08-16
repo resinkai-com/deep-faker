@@ -1,14 +1,13 @@
 """Trading platform simulation configuration."""
 
-import uuid
 from datetime import datetime
 
 from deep_faker import (
     AddDecay,
     BaseEvent,
-    Context,
     Entity,
     Field,
+    FlowContext,
     NewEvent,
     Select,
     SetState,
@@ -149,7 +148,7 @@ sim = Simulation(
 
 # Define flows
 @sim.flow(initiation_weight=2.0)
-def new_trader_onboarding(ctx: Context):
+def new_trader_onboarding(ctx: FlowContext):
     """A new trader registers and logs in."""
     yield NewEvent(ctx, TraderRegistered, save_entity=Trader)
     yield AddDecay(ctx, rate=0.1, seconds=5)
@@ -159,13 +158,13 @@ def new_trader_onboarding(ctx: Context):
 
 
 @sim.flow(initiation_weight=1.0)
-def new_stock_listing(ctx: Context):
+def new_stock_listing(ctx: FlowContext):
     """New stock gets listed on the exchange."""
     yield NewEvent(ctx, StockListed, save_entity=Stock)
 
 
 @sim.flow(initiation_weight=12.0)
-def market_price_movements(ctx: Context):
+def market_price_movements(ctx: FlowContext):
     """Regular price updates for stocks."""
     # Price update
     yield NewEvent(ctx, PriceUpdate, symbol="AAPL", old_price=100.0)
@@ -175,7 +174,7 @@ def market_price_movements(ctx: Context):
 @sim.flow(
     initiation_weight=8.0, filter=Select(Trader, where=[("is_logged_in", "is", True)])
 )
-def active_trading_session(ctx: Context):
+def active_trading_session(ctx: FlowContext):
     """Active trader places orders and trades."""
     # Place an order
     yield NewEvent(
@@ -222,7 +221,7 @@ def active_trading_session(ctx: Context):
 @sim.flow(
     initiation_weight=6.0, filter=Select(Trader, where=[("is_logged_in", "is", False)])
 )
-def returning_trader_login(ctx: Context):
+def returning_trader_login(ctx: FlowContext):
     """Existing trader logs back in."""
     yield NewEvent(
         ctx, TraderLoggedIn, mutate=SetState(Trader, [("is_logged_in", "is", True)])
@@ -232,7 +231,7 @@ def returning_trader_login(ctx: Context):
 @sim.flow(
     initiation_weight=4.0, filter=Select(Trader, where=[("is_logged_in", "is", True)])
 )
-def market_monitoring(ctx: Context):
+def market_monitoring(ctx: FlowContext):
     """Trader receives market alerts."""
     yield NewEvent(ctx, MarketAlert, symbol="AAPL")
     yield AddDecay(ctx, rate=0.8, seconds=30)

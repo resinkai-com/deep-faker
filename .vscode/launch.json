@@ -20,6 +20,23 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Debug deepfaker E03_user_purchase_product",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "deep_faker.cli",
+            "args": [
+                "--chdir",
+                "examples",
+                "E03_user_purchase_product.py"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ]
 }

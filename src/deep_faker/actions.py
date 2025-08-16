@@ -113,7 +113,7 @@ class FlowContext:
         # Set entity flow_name (implicit mutation)
         self.global_context.set_entity_flow(entity_type, entity, self.flow_name)
 
-    def get_entity(self, entity_type: Type[Entity]) -> Optional[Entity]:
+    def get_selected_entity(self, entity_type: Type[Entity]) -> Optional[Entity]:
         """Get a selected entity of the specified type from the flow context."""
         if entity_type not in self.selected_entities:
             return None
@@ -123,7 +123,7 @@ class FlowContext:
             entity_type, entity_id, self.flow_clock
         )
 
-    def get_entity_id(self, entity_type: Type[Entity]) -> Optional[str]:
+    def get_selected_entity_id(self, entity_type: Type[Entity]) -> Optional[str]:
         """Get the ID of a selected entity."""
         return self.selected_entities.get(entity_type)
 
@@ -131,12 +131,12 @@ class FlowContext:
         """Advance the flow clock."""
         self.flow_clock += delta
 
-    def get_primary_entity(self) -> Optional[Entity]:
+    def get_primary_selected_entity(self) -> Optional[Entity]:
         """Get the primary entity (first selected entity)."""
         if self.selected_entities:
             # Return the first selected entity
             entity_type = next(iter(self.selected_entities.keys()))
-            return self.get_entity(entity_type)
+            return self.get_selected_entity(entity_type)
         return None
 
     def mutate_selected_entity(self, entity_type: Type[Entity], updates: List[Tuple]):
@@ -174,61 +174,15 @@ class FlowContext:
             )
 
 
-class Context:
-    """Context object passed to flows containing current simulation state."""
-
-    def __init__(
-        self,
-        simulation,
-        current_time: datetime,
-        selected_entity: Optional[Entity] = None,
-        session_id: Optional[str] = None,
-    ):
-        self.simulation = simulation
-        self.current_time = current_time
-        self.selected_entity = selected_entity
-        self.current_event_data = {}
-        # Track entities by type - allows multiple entities per flow
-        self.entities_by_type: Dict[Type[Entity], Entity] = {}
-        # Session ID for this flow execution
-        if session_id:
-            self.session_id = session_id
-        else:
-            import shortuuid
-
-            self.session_id = shortuuid.uuid()[:8]  # 8 character session ID
-
-        # If we have a selected entity, add it to the entities_by_type
-        if selected_entity:
-            self.entities_by_type[type(selected_entity)] = selected_entity
-
-    def add_entity(self, entity_type: Type[Entity], entity: Entity):
-        """Add an entity to the context for this flow."""
-        self.entities_by_type[entity_type] = entity
-
-    def get_entity(self, entity_type: Type[Entity]) -> Optional[Entity]:
-        """Get an entity of the specified type from the context."""
-        return self.entities_by_type.get(entity_type)
-
-    def get_primary_entity(self) -> Optional[Entity]:
-        """Get the primary entity (selected or first created)."""
-        if self.selected_entity:
-            return self.selected_entity
-        # Return the first entity if any
-        if self.entities_by_type:
-            return next(iter(self.entities_by_type.values()))
-        return None
-
-
 class NewEvent:
     """Action to create a new event."""
 
     def __init__(
         self,
-        ctx: Union["Context", "FlowContext"],
+        ctx: "FlowContext",
         event_schema: Type[BaseEvent],
         save_entity: Optional[Type[Entity]] = None,
-        mutate: Optional["SetState"] = None,
+        mutate: Optional[Union["SetState", List["SetState"]]] = None,
         **field_overrides,
     ):
         self.ctx = ctx
@@ -241,9 +195,7 @@ class NewEvent:
 class AddDecay:
     """Action to advance time with a probability of flow termination."""
 
-    def __init__(
-        self, ctx: Union["Context", "FlowContext"], rate: float, **kwargs_for_time_delta
-    ):
+    def __init__(self, ctx: "FlowContext", rate: float, **kwargs_for_time_delta):
         self.ctx = ctx
         self.rate = rate  # Probability of termination (0.0 to 1.0)
         self.time_delta = timedelta(**kwargs_for_time_delta)
@@ -252,25 +204,41 @@ class AddDecay:
 class Select:
     """Action/Filter to select entities based on conditions."""
 
-    def __init__(self, entity_type: Type[Entity], where: Optional[List[tuple]] = None):
-        self.entity_type = entity_type
-        self.where = where or []
+    def __init__(
+        self,
+        ctx_or_entity_type: Union["FlowContext", Type[Entity]] = None,
+        entity_type: Optional[Type[Entity]] = None,
+        where: Optional[List[tuple]] = None,
+    ):
+        # Support both old syntax (just entity_type) and new action syntax (ctx, entity_type)
+        if isinstance(ctx_or_entity_type, type) and issubclass(
+            ctx_or_entity_type, Entity
+        ):
+            # Old syntax: Select(User, where=[...])
+            self.ctx = None
+            self.entity_type = ctx_or_entity_type
+            self.where = entity_type if isinstance(entity_type, list) else (where or [])
+        else:
+            # New action syntax: Select(ctx, User, where=[...])
+            self.ctx = ctx_or_entity_type
+            self.entity_type = entity_type
+            self.where = where or []
 
     def matches(self, entity: Entity) -> bool:
         """Check if entity matches the where conditions."""
         for field, operation, value in self.where:
             entity_value = getattr(entity, field, None)
 
-            if operation == "is":
+            if operation == "is" or operation == "=":
                 if entity_value != value:
                     return False
-            elif operation == "is_not":
+            elif operation == "is_not" or operation == "!=":
                 if entity_value == value:
                     return False
-            elif operation == "greater_than":
+            elif operation == "greater_than" or operation == ">":
                 if not (entity_value is not None and entity_value > value):
                     return False
-            elif operation == "less_than":
+            elif operation == "less_than" or operation == "<":
                 if not (entity_value is not None and entity_value < value):
                     return False
             elif operation == "in":

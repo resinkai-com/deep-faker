@@ -341,14 +341,50 @@ def user_login_and_search(ctx: FlowContext):
     )
 
 
+@sim.flow(initiation_weight=6.0)
+def new_product_browsing_flow(ctx: FlowContext):
+    """User browses and clicks on products using new Select action syntax."""
+    # Select a logged-in user
+    yield Select(ctx, User, where=[("is_logged_in", "is", True)])
+
+    # Select an available product
+    yield Select(ctx, Product, where=[("inventory_count", "greater_than", 0)])
+
+    user = ctx.get_selected_entity(User)
+    product = ctx.get_selected_entity(Product)
+
+    if not user or not product:
+        return
+
+    # Click on product
+    yield NewEvent(
+        ctx,
+        ProductClicked,
+        session_id=user.current_session_id,
+        product_id=product.get_primary_key(),
+        product_name=product.name,
+        price=product.price,
+        mutate=SetState(Product, [("click_count", "add", 1)]),
+    )
+
+    yield AddDecay(ctx, rate=0.3, seconds=5)
+
+    # View product details
+    yield NewEvent(
+        ctx,
+        ProductDetailsViewed,
+        session_id=user.current_session_id,
+        product_id=product.get_primary_key(),
+        mutate=SetState(Product, [("view_count", "add", 1)]),
+    )
+
+
 @sim.flow(
     initiation_weight=8.0, filter=Select(User, where=[("is_logged_in", "is", True)])
 )
 def product_browsing_flow(ctx: FlowContext):
-    """User browses and clicks on products."""
-    user = ctx.get_entity(User)
-    if not user:
-        return
+    """User browses and clicks on products (legacy syntax)."""
+    user = ctx.get_selected_entity(User)
 
     # Get a random product
     products = ctx.global_context.get_entities(Product)
@@ -387,9 +423,7 @@ def product_browsing_flow(ctx: FlowContext):
 )
 def add_to_cart_flow(ctx: FlowContext):
     """User adds products to cart."""
-    user = ctx.get_entity(User)
-    if not user:
-        return
+    user = ctx.get_selected_entity(User)
 
     # Get or create cart
     cart_id = user.cart_id
@@ -424,9 +458,7 @@ def add_to_cart_flow(ctx: FlowContext):
 )
 def checkout_flow(ctx: FlowContext):
     """User goes through checkout process."""
-    user = ctx.get_entity(User)
-    if not user or not user.cart_id:
-        return
+    user = ctx.get_selected_entity(User)
 
     # Start checkout
     cart_total = 150.0 + (hash(user.cart_id) % 100)  # Simulated cart total
@@ -497,7 +529,7 @@ def checkout_flow(ctx: FlowContext):
 @sim.flow(initiation_weight=1.5)
 def error_flow(ctx: FlowContext):
     """Simulate various errors that can occur."""
-    user = ctx.get_entity(User) if ctx.selected_entities else None
+    user = ctx.get_selected_entity(User) if ctx.selected_entities else None
     user_id = user.get_primary_key() if user else None
 
     yield NewEvent(ctx, ErrorTriggered, user_id=user_id)
@@ -509,9 +541,7 @@ def error_flow(ctx: FlowContext):
 )
 def order_management_flow(ctx: FlowContext):
     """Existing customers might edit or cancel orders."""
-    user = ctx.get_entity(User)
-    if not user:
-        return
+    user = ctx.get_selected_entity(User)
 
     order_id = f"order_{ctx.session_id[:8]}"
 
