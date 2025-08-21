@@ -43,6 +43,7 @@ class Simulation:
         n_flows: int = 1,
         random_seed: Optional[int] = None,
         initial_entities: Optional[Dict[Union[str, Type[Entity]], int]] = None,
+        emit_initial_entities: bool = True,
     ):
         self.duration = self._parse_duration(duration)
         self.start_time = self._parse_start_time(start_time)
@@ -50,6 +51,7 @@ class Simulation:
         self.n_flows = n_flows
         self.random_seed = random_seed
         self.initial_entities = initial_entities or {}
+        self.emit_initial_entities = emit_initial_entities
 
         self.flows: List[FlowDefinition] = []
         self.outputs = []
@@ -118,6 +120,21 @@ class Simulation:
                     event_data = self._generate_event_data(entity_type.source_event)
                     entity = entity_type(**event_data)
                     self.global_context.add_entity(entity_type, entity)
+
+                    # Emit creation event if enabled
+                    if self.emit_initial_entities:
+                        # Populate standard event metadata fields
+                        import shortuuid
+
+                        event_data["sys__eid"] = shortuuid.uuid()[:12]
+                        timestamp_ms = int(self.start_time.timestamp() * 1000)
+                        event_data["sys__ets"] = timestamp_ms
+                        event_data["sys__sid"] = "initial_setup"
+
+                        # Create and emit the source event
+                        event = entity_type.source_event(**event_data)
+                        for output in self.outputs:
+                            output.send_event(event)
 
     def _find_entity_type_by_name(self, name: str) -> Optional[Type[Entity]]:
         """Find entity type by class name."""

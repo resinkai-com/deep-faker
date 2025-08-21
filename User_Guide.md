@@ -20,6 +20,11 @@ class AccountCreated(BaseEvent):
     email: str = Field(faker="email")
     full_name: str = Field(faker="name")
 
+class UserLogin(BaseEvent):
+    user_id: str
+    session_id: str = Field(faker="uuid4")
+    login_time: datetime = Field(faker="now")
+
 class ProductAdded(BaseEvent):
     user_id: str
     product_id: str
@@ -63,9 +68,9 @@ def new_user_registration(ctx: FlowContext):
     yield NewEvent(ctx, AccountCreated, save_entity=User)
     yield AddDecay(ctx, rate=0.2, seconds=30)  # 20% drop-off
 
-    # User logs in
+    # User logs in after registration
     yield NewEvent(
-        ctx, ProductAdded,
+        ctx, UserLogin,
         mutate=SetState(User, [("is_logged_in", "is", True)])
     )
 
@@ -75,7 +80,7 @@ def new_user_registration(ctx: FlowContext):
 )
 def shopping_flow(ctx: FlowContext):
     """Logged-in users add products and complete orders."""
-    user = ctx.get_entity(User)
+    user = ctx.get_selected_entity(User)
     cart_id = f"cart_{ctx.session_id[:8]}"
 
     # Add product to cart
@@ -170,7 +175,7 @@ Actions are declarative instructions that flows yield to the simulation engine:
 | `NewEvent` | Generate an event          | `NewEvent(ctx, UserLogin, save_entity=User)`      |
 | `AddDecay` | Advance time with drop-off | `AddDecay(ctx, rate=0.3, minutes=5)`              |
 | `SetState` | Update entity state        | `SetState(User, [("login_count", "add", 1)])`     |
-| `Select`   | Filter entities            | `Select(User, where=[("is_active", "is", True)])` |
+| `Select`   | Select/filter entities     | `Select(ctx, User, where=[("is_active", "is", True)])` or `Select(User, where=[...])` for flow filters |
 
 ### Flows
 
@@ -184,7 +189,7 @@ Flows define business logic as Python generators. You can select entities in two
 )
 def legacy_user_session_flow(ctx: FlowContext):
     """Flow starts only if active user available."""
-    user = ctx.get_entity(User)  # Pre-selected user
+    user = ctx.get_selected_entity(User)  # Pre-selected user
     yield NewEvent(ctx, UserLogin, mutate=SetState(User, [("login_count", "add", 1)]))
 ```
 
@@ -198,8 +203,8 @@ def user_session_flow(ctx: FlowContext):
     yield Select(ctx, Product, where=[("status", "is", "available")])
     
     # Get the selected entities
-    user = ctx.get_entity(User)
-    product = ctx.get_entity(Product)
+    user = ctx.get_selected_entity(User)
+    product = ctx.get_selected_entity(Product)
 
     # Generate login event with state mutation
     yield NewEvent(
@@ -210,8 +215,8 @@ def user_session_flow(ctx: FlowContext):
     # 30% chance to drop off after 2 minutes
     yield AddDecay(ctx, rate=0.3, minutes=2)
 
-    # Continue with browsing...
-    yield NewEvent(ctx, PageView, page="/dashboard")
+    # Continue with product browsing...
+    yield NewEvent(ctx, ProductAdded, product_id=product.get_primary_key())
 ```
 
 ### Simulation
@@ -238,17 +243,19 @@ sim = Simulation(
 
 The simulation maintains two levels of context:
 
-**Global Context:**
+**Global Context (`GlobalContext`):**
 
 - Manages all entities and their states over time
 - Tracks which entities are available vs. active in flows
 - Provides global simulation clock
+- Handles entity selection and mutation operations
 
-**Flow Context:**
+**Flow Context (`FlowContext`):**
 
 - Maintains session ID for event correlation
-- Tracks selected entities for the current flow
+- Tracks selected entities for the current flow (by entity type)
 - Has its own clock that advances with AddDecay
+- Provides `get_selected_entity(EntityType)` method to access selected entities
 
 ### Entity Management
 
@@ -289,8 +296,9 @@ The system automatically manages some state:
 
 ### Entity Selection and Filtering
 
-Flows can specify prerequisites for starting:
+There are two ways to select entities:
 
+**1. Flow Prerequisites (Legacy Pattern):**
 ```python
 @sim.flow(
     initiation_weight=5.0,
@@ -302,7 +310,22 @@ Flows can specify prerequisites for starting:
 def power_user_flow(ctx: FlowContext):
     # This flow only runs if we can find an active user
     # with more than 5 logins who isn't already in a flow
-    pass
+    user = ctx.get_selected_entity(User)  # Pre-selected entity
+```
+
+**2. Dynamic Selection Within Flows (Recommended):**
+```python
+@sim.flow(initiation_weight=5.0)
+def power_user_flow(ctx: FlowContext):
+    # Select entities dynamically during flow execution
+    yield Select(ctx, User, where=[
+        ("is_active", "is", True),
+        ("login_count", "greater_than", 5)
+    ])
+    
+    user = ctx.get_selected_entity(User)
+    if not user:
+        return  # No suitable user found, flow terminates
 ```
 
 ## Configuration Reference

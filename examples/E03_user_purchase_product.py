@@ -14,7 +14,7 @@ from deep_faker import (
     StdOutOutput,
 )
 from deep_faker.logging import get_logger
-from deep_faker.outputs import FileOutput
+from deep_faker.outputs import FileOutput, KafkaOutput
 
 
 # 1. Define Event Schemas
@@ -136,8 +136,18 @@ def user_purchase_flow(ctx: FlowContext):
 
 # 5. Configure Outputs
 sim.add_output(StdOutOutput())
-sim.add_output(FileOutput(f"output/{__name__}.jsonl"))
-# Log events to the console
+sim.add_output(FileOutput("output/E03_user_purchase_product.jsonl"))
+sim.add_output(
+    KafkaOutput(
+        topic_mapping={
+            ProductPurchased: "e03-product-purchased",
+            UserRegistered: "e03-user-registered",
+            ProductCreatedOrUpdated: "e03-product-created-or-updated",
+        },
+        bootstrap_servers="localhost:9092",
+    )
+)
+
 
 # 6. Run Simulation
 if __name__ == "__main__":
